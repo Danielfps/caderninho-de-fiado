@@ -59,8 +59,8 @@ terminal (sed, python) não disparam o gancho: aí rode o script à mão.
 
 ## Dados (não quebrar!)
 
-Ficam só no aparelho: IndexedDB `caderninho` → store `kv` → chave `caderninho-v1`
-(se falhar, `localStorage['caderninho-v1']`). Formato:
+Ficam no aparelho: IndexedDB `caderninho` → store `kv` → chave `caderninho-v1`
+(se falhar, `localStorage['caderninho-v1']`). Com conta, também sobem para ela (veja "Guardar na conta"). Formato:
 
 ```js
 { produtos: [{id, nome, preco, custo, foto /* dataURL jpeg 480px */, ativo}],
@@ -103,7 +103,11 @@ Ficam só no aparelho: IndexedDB `caderninho` → store `kv` → chave `cadernin
 - Vendas, Recebi e Acertos levam o id do app numa coluna escondida (K, G, G). "Trazer planilha editada"
   (`trazerPlanilha()`) só cria lançamentos para linhas sem id e guarda a assinatura delas em `planilha.importados`.
   Meu Mês, materiais, receitas, dados dos produtos e clientes vêm da planilha; o que veio do app não é alterado.
-- Mudou o modelo (linhas, colunas, abas)? Confira `baixarPlanilha()` e `trazerPlanilha()`. O Meu Mês é achado pelo
+- **Celular vazio** (`S.lanc` sem nada): "Trazer planilha" entra no modo recuperar e traz também as linhas com código do
+  app (mesmo código; vendas com vários produtos voltam juntas, com o custo da coluna H). Assim perdeu o celular, a
+  planilha guardada no Drive traz o histórico de volta. "Mandar a planilha" (`mandarPlanilha()`) usa o compartilhar
+  do celular (Drive, WhatsApp); `montarPlanilha()` monta o arquivo para os dois botões.
+- Mudou o modelo (linhas, colunas, abas)? Confira `montarPlanilha()` e `trazerPlanilha()`. O Meu Mês é achado pelo
   texto da coluna B (`achar()`), as listas pelas linhas fixas (5 até o fim de cada aba).
 - Testar: `node testes/planilha.test.js` (veja "Testar" abaixo).
 
@@ -120,8 +124,11 @@ Ficam só no aparelho: IndexedDB `caderninho` → store `kv` → chave `cadernin
 - **A conta é obrigatória.** Sem conta, sem teste grátis válido e sem assinatura, `render()` mostra o "portão"
   (`vPortao()`, `<section id="portao" data-estado="entrar|codigo|conferindo|assinar">`) no lugar do caderninho e o
   `<body>` ganha a classe `trancado` (some o rodapé). Os dados do caderninho nunca são apagados por isso.
-- Regra: **3 dias grátis** a partir da criação da conta; depois, **assinatura mensal pelo Mercado Pago** (assinatura
-  sem plano, `/preapproval`). Quem decide é o servidor: `minha_situacao()` devolve `liberado_ate` pelo relógio dele.
+- Regra: **3 dias grátis** a partir da criação da conta; depois, um dos planos (02/11/2026): **mensal** no cartão pelo
+  Mercado Pago (assinatura sem plano, `/preapproval`), **1º mês R$ 14,90** (uma vez por conta) e depois **R$ 19,90**
+  (o servidor sobe o valor depois da 1ª cobrança aprovada); ou **anual R$ 149,90**, pagamento único no Checkout Pro
+  (Pix ou cartão), vale 365 dias e não renova sozinho (tabela `compras`, `registrar_compra()`). Preços na tabela
+  `planos` (`mensal`, `mensal_promo`, `anual`). Telas: `cartoesPlanos()`, `telaAssinar()`, `precos()`, `anualAgora()`. Quem decide é o servidor: `minha_situacao()` devolve `liberado_ate` pelo relógio dele.
   O app guarda a última resposta em `localStorage['caderninho-acesso']` (com `dif` = relógio do servidor menos o do
   celular) para abrir sem internet; se o relógio do celular voltar para trás, pede para conferir de novo.
 - Tudo no bloco "minha conta e assinatura" de `app/index.html`. Cliques `conta*`, `assin*` e `teste*` vão para
@@ -130,13 +137,27 @@ Ficam só no aparelho: IndexedDB `caderninho` → store `kv` → chave `cadernin
 - Servidor em `supabase/` (Esquadro/Codex): migração com `planos` (preço, leitura pública), `assinaturas` (só leitura
   da própria linha) e `minha_situacao()`; Edge Functions `assinatura` (`criar` devolve o `init_point` do Mercado Pago,
   `conferir` busca no Mercado Pago e atualiza) e `mp-webhook` (aviso do Mercado Pago, confere o `x-signature`).
-  Como ligar: `docs/conta.md` e `docs/assinatura.md`. **Preço provisório: R$ 9,90** (tabela `planos`).
+  Como ligar: `docs/conta.md` e `docs/assinatura.md`. Migrações novas: `202611020001_sincronizar.sql` e
+  `202611020002_planos.sql`.
 - `CONTA_URL` / `CONTA_CHAVE` (chave **pública**, nunca a `service_role`). **Vazios = MODO DE TESTE**: o objeto
   `teste` faz o papel do servidor (mesmas regras, contas em `localStorage['caderninho-teste']`), aparece o botão 🧪
   no alto com o painel (passar 1 dia, fim do teste grátis, passar 1 mês, cancelar, apagar contas de teste) e o
   pagamento é de mentira. Preencheu os dois, o modo de teste some sozinho.
 - Mudou uma regra de acesso? Mude nos 3 lugares: `minha_situacao()` (SQL), `calcularLiberadoAte()`
   (`supabase/functions/_shared/assinatura.mjs`) e `teste.situacao()` (app).
+
+## Conta que não cai e guardar na conta (02/11/2026)
+
+- **A entrada na conta nunca cai por falta de internet**, servidor fora do ar, demora ou relógio errado. `tokenValido()`
+  só sai da conta com erro definitivo do servidor (`SAIU`) e depois de `adotarGuardada()` (outra janela pode ter
+  renovado). `logado()` renova e repete uma vez quando o servidor recusa o token (`jwt_vencido`). `chamar()` desiste em
+  15 s (`espera`). Mensal ativa vencida sem internet: `FOLGA_SEM_REDE` (7 dias). Não quebre isso: rode o teste abaixo.
+- **Vários celulares:** o objeto `sync` (bloco "guardar na conta" de `app/index.html`) sobe o que mudou e desce o que os
+  outros mudaram, por registro (`registrosLocais()`, `aplicarRegistro()`, `impressao()`). `salvar()` chama
+  `sync.mudou()`; o que veio de outro celular grava com `gravarLocal()` (sem subir de novo). Coleção nova nos dados?
+  Inclua em `registrosLocais()`, `aplicarRegistro()`, `COLECOES` e na lista da função `sincronizar` (SQL).
+  Explicação completa: `docs/sincronizar.md`. Na tela é "Guardado na sua conta", nunca "sincronizar".
+- Outra conta no mesmo celular: `sync.prepararDono()` guarda as contas da anterior em `caderninho-v1@<id>`.
 
 ## Publicação
 
@@ -156,6 +177,9 @@ conferir Resumo) num celular emulado (`devices['Pixel 7']`).
   `cd testes && npm i @playwright/test && npx playwright install chromium`). Roda o app no modo de teste num Pixel 7:
   criar conta, teste grátis, fim dos 3 dias, pagamento de teste, renovação, cancelamento, sair e entrar. Tira prints
   em `testes/prints/`. Tem que dar 0 falha. Servidor: `node --test testes/assinatura.test.mjs`.
+- **Vários celulares, sem internet, planos:** `node testes/sincronizar.e2e.mjs` (dois celulares contra o Supabase de
+  mentira `testes/supabase-falso.mjs`, que roda as migrações de verdade no PGlite). Tem que dar 0 falha.
+  SQL e servidor: `node --test testes/sincronizar.test.mjs testes/supabase-falso.test.mjs testes/assinatura.test.mjs`.
 - **Planilha:** `node testes/planilha.test.js` (com o servidor acima rodando; usa LibreOffice e openpyxl, via
   `testes/planilha_xlsx.py`). Traz a planilha original para um app vazio, mexe nos custos pelo app (preço de
   material, perdas, salário, compra pronta, preço sugerido, venda, apagar material, conta nova), baixa, mexe no

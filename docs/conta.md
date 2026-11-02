@@ -13,7 +13,9 @@ Enquanto CONTA_URL e CONTA_CHAVE estiverem vazios, o app abre no MODO DE TESTE: 
 - Nome (em `user_metadata.nome`), e-mail e senha (a senha fica só no Supabase, com hash).
 - Se a pessoa ligar: o aplicativo de códigos da proteção em 2 etapas (TOTP, como Google Authenticator,
   Microsoft Authenticator etc.).
-- **As vendas, clientes e produtos continuam só no celular.** Nada disso vai para o Supabase.
+- **Desde 02/11/2026 as vendas, clientes e produtos também ficam na conta** (tabela `registros`, só a própria pessoa
+  acessa, pela função `sincronizar`), para usar em vários celulares e recuperar ao trocar de celular. Veja
+  [docs/sincronizar.md](sincronizar.md). **Não ligue** "Single session per user" no Supabase.
 - No celular, a entrada na conta fica em `localStorage['caderninho-conta']`, separada dos dados do caderninho.
 
 ## Passo a passo (uma vez só)

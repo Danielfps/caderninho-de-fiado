@@ -126,7 +126,7 @@ export async function cancelarDuplicadas(config: Config, lista: any[]) {
 
 export async function lerAssinatura(config: Config, userId: string) {
   const query = new URLSearchParams({
-    select: "user_id,status,valido_ate,mp_preapproval_id,atualizado_em",
+    select: "user_id,status,valido_ate,mp_preapproval_id,atualizado_em,promo_consumida_em,valor",
     user_id: `eq.${userId}`,
     limit: "1",
   });
@@ -201,11 +201,25 @@ export function urlDeVolta(config: Config, candidata: unknown) {
 }
 
 export async function pegarPreco(config: Config) {
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/planos?select=valor&id=eq.mensal&ativo=eq.true&limit=1`, {
+  return await pegarPrecoPlano(config, "mensal");
+}
+
+export async function pegarPrecoPlano(config: Config, plano: string) {
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/planos?select=valor&id=eq.${encodeURIComponent(plano)}&ativo=eq.true&limit=1`, {
     headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}` },
   });
   if (!response.ok) throw new Error("Falha ao ler preço");
   const preco = Number((await response.json())[0]?.valor);
-  if (!Number.isFinite(preco) || preco <= 0) throw new Error("Preço mensal inválido");
+  if (!Number.isFinite(preco) || preco <= 0) throw new Error("Preço de plano inválido");
   return preco;
+}
+
+export async function registrarCompra(config: Config, pagamentoId: string, userId: string, valor: number, aprovado: boolean) {
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/registrar_compra`, {
+    method: "POST",
+    headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_payment_id: pagamentoId, p_user: userId, p_valor: valor, p_aprovado: aprovado }),
+  });
+  if (!response.ok) throw new Error("Falha ao registrar compra anual");
+  return await response.json();
 }

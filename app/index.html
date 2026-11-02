@@ -236,6 +236,12 @@ body.trancado main{padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))}
 .preco{text-align:center}
 .preco .big{margin-top:2px}
 .banner.aviso-pag{background:var(--warn-soft)}
+.planos{display:flex;flex-direction:column;gap:10px}
+.plano{display:flex;flex-direction:column;gap:2px;text-align:left;width:100%;font:inherit;color:inherit;background:var(--surface);border:2px solid var(--line);border-radius:var(--r);padding:14px 16px;position:relative;cursor:pointer}
+.plano[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.plano .lbl{font-weight:700}
+.plano .eco{position:absolute;top:12px;right:12px}
+.plano .depois{font-weight:600}
 .sheet>*{flex-shrink:0}
 .sheet form{display:flex;flex-direction:column;gap:14px}
 .senha{position:relative}
@@ -319,19 +325,28 @@ const IC={
 const KEY='caderninho-v1';
 let S={produtos:[],clientes:[],lanc:[],ajustes:{negocio:''},planilha:null,ultimoBackup:null};
 function abrirIDB(){return new Promise((res,rej)=>{try{const r=indexedDB.open('caderninho',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
-async function carregar(){
-  try{const db=await abrirIDB();const v=await new Promise((res,rej)=>{const q=db.transaction('kv').objectStore('kv').get(KEY);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)});if(v){S=Object.assign(S,v);return}}catch(e){}
-  try{const v=localStorage.getItem(KEY);if(v)S=Object.assign(S,JSON.parse(v))}catch(e){}
-}
+async function carregar(){const v=await lerKV(KEY);if(v)S=Object.assign(S,v)}
 /* dados antigos (e cópias antigas) não têm "ajustes" nem "planilha": completa com o padrão */
 function completar(){S.ajustes=Object.assign({negocio:''},S.ajustes);S.planilha=Object.assign(planilhaPadrao(),S.planilha)}
-async function salvar(){
-  const copia=JSON.parse(JSON.stringify(S));
-  let ok=false;
-  try{const db=await abrirIDB();await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(copia,KEY);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});ok=true}catch(e){}
-  if(!ok){try{localStorage.setItem(KEY,JSON.stringify(copia));ok=true}catch(e){}}
-  if(!ok)toast('Não consegui guardar no celular. Faça uma cópia de segurança agora.',true);
+/* guarda um valor no IndexedDB (ou, se falhar, no localStorage); devolve se deu certo */
+async function gravarKV(chave,valor){
+  try{const db=await abrirIDB();await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(valor,chave);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});return true}catch(e){}
+  try{localStorage.setItem(chave,JSON.stringify(valor));return true}catch(e){}
+  return false;
 }
+async function lerKV(chave){
+  try{const db=await abrirIDB();const v=await new Promise((res,rej)=>{const q=db.transaction('kv').objectStore('kv').get(chave);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)});if(v!==undefined)return v}catch(e){}
+  try{const v=localStorage.getItem(chave);if(v)return JSON.parse(v)}catch(e){}
+  return null;
+}
+/* grava as contas no celular sem avisar a conta (usado quando o que mudou veio de outro celular) */
+async function gravarLocal(){
+  const ok=await gravarKV(KEY,JSON.parse(JSON.stringify(S)));
+  if(!ok)toast('Não consegui guardar no celular. Faça uma cópia de segurança agora.',true);
+  return ok;
+}
+/* toda mudança feita aqui: grava no celular e, com conta, sobe para a conta (os outros celulares recebem) */
+async function salvar(){if(await gravarLocal())sync.mudou()} // não gravou no celular: não manda (ao reabrir, o celular voltaria ao antigo e mandaria por cima)
 
 /* ---------- contas ---------- */
 /* "ajuste" (presente/desconto ou correção) entra com o próprio sinal: negativo diminui a dívida, positivo aumenta */
@@ -394,7 +409,7 @@ function vResumo(){
   }
   const dev=S.clientes.map(c=>({c,d:saldo(c.id).deve})).filter(x=>x.d>0).sort((a,b)=>b.d-a.d);
   const semCusto=S.produtos.some(p=>p.ativo&&!(p.custo>0));
-  const precisaBackup=S.lanc.length>0&&(!S.ultimoBackup||Date.now()-S.ultimoBackup>7*864e5);
+  const precisaBackup=S.lanc.length>0&&!sync.pode()&&(!S.ultimoBackup||Date.now()-S.ultimoBackup>7*864e5); // com conta, as contas já ficam guardadas nela
   return `
   ${bannerAssinatura()}
   ${bannerInstalar()}
@@ -537,7 +552,7 @@ function ir(v){ui.view=v;render();window.scrollTo(0,0);const a=$('.abas [aria-pr
 
 /* ---------- janelas (de baixo para cima) ---------- */
 function abrir(html){$('#sheetBody').innerHTML=html;$('#sheet').hidden=false;const f=$('#sheetBody [autofocus]');if(f)setTimeout(()=>f.focus(),50)}
-function fechar(){$('#sheet').hidden=true;$('#sheetBody').innerHTML=''}
+function fechar(){$('#sheet').hidden=true;$('#sheetBody').innerHTML='';if(redesenharDepois)setTimeout(()=>{if(redesenharDepois&&$('#sheet').hidden)redesenharSeguro()})} // chegou novidade de outro celular enquanto a janela estava aberta
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')fechar()});
 let tt;function toast(m,erro){const t=$('#toast');t.innerHTML=(erro?'':IC.ok)+'<span>'+esc(m)+'</span>';t.classList.toggle('erro',!!erro);t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,erro?4500:2600)}
 let confirmar=null;
@@ -594,7 +609,8 @@ function formPagar(){const c=cli(ui.cliente),s=saldo(c.id);formaPag='Pix';
   <button class="btn" data-act="salvarPag">Salvar pagamento</button>
   <button class="btn ghost" data-act="fechar">Cancelar</button>`)}
 function registrarPag(valor){
-  const c=cli(ui.cliente);const d=($('#dPag')&&$('#dPag').value)||hoje();
+  const c=cli(ui.cliente);if(!c){fechar();render();return} // apagado em outro celular
+  const d=($('#dPag')&&$('#dPag').value)||hoje();
   S.lanc.push({id:uid(),tipo:'pag',clienteId:c.id,valor:r2(valor),forma:formaPag,data:d,criado:new Date().toISOString()});
   salvar();fechar();render();
   const rest=saldo(c.id).deve;toast(rest>0?`Pagamento anotado. Ainda falta ${brl(rest)}`:rest<0?`Pagamento anotado. Ficou com ${brl(-rest)} de crédito`:'Pagamento anotado. Está em dia');
@@ -637,7 +653,8 @@ function formAjuste(){const c=cli(ui.cliente),s=saldo(c.id);motivoAj='erro';
   <p class="muted small" style="margin:0">A mudança fica anotada no histórico. Para corrigir uma venda ou um pagamento, você também pode tocar nele no histórico.</p>
   <button class="btn ghost" data-act="fechar">Cancelar</button>`)}
 function registrarAjuste(novo,motivo){
-  const c=cli(ui.cliente),dif=r2(novo-saldo(c.id).deve);
+  const c=cli(ui.cliente);if(!c){fechar();render();return}
+  const dif=r2(novo-saldo(c.id).deve);
   if(!dif){toast('Esse já é o valor que a pessoa deve.',true);return}
   S.lanc.push({id:uid(),tipo:'ajuste',clienteId:c.id,valor:dif,motivo:dif>0?'erro':motivo,data:hoje(),criado:new Date().toISOString()});
   salvar();fechar();render();
@@ -653,8 +670,9 @@ function formConfig(){
   <div class="field"><label for="aNeg">Nome do seu negócio <span class="opt">(se quiser)</span></label><input class="input" id="aNeg" value="${esc(S.ajustes.negocio)}" placeholder="Ex.: Cantina da Escola" autocomplete="off"></div>
   <p class="muted small" style="margin:-4px 0 0">Aparece no alto da tela e no fim da mensagem de cobrança.</p>
   <button class="btn ghost" data-act="salvarNegocio">Salvar nome</button>
+  ${blocoOutroCelular()}
   <h2>Cópia de segurança</h2>
-  <p class="muted" style="margin:0">Suas contas ficam guardadas só neste celular. Guarde uma cópia de vez em quando: se trocar de celular ou limpar o navegador, você recupera tudo.</p>
+  <p class="muted" style="margin:0">${sync.pode()?'Suas contas ficam neste celular e na sua conta. Uma cópia em arquivo (ou a planilha) é uma garantia a mais, que fica com você.':'Suas contas ficam guardadas só neste celular. Guarde uma cópia de vez em quando: se trocar de celular ou limpar o navegador, você recupera tudo.'}</p>
   <button class="btn" data-act="baixar">Salvar cópia em arquivo</button>
   <button class="btn soft" data-act="copiar">Copiar cópia (para colar no WhatsApp)</button>
   <h2>Recuperar uma cópia</h2>
@@ -715,6 +733,8 @@ const ERROS={
   insufficient_aal:'Digite o código de segurança primeiro.',
   signup_disabled:'Os cadastros estão fechados no momento.',
   ja_ativa:'Sua assinatura já está ativa.',
+  ja_paga:'Você já tem o Caderninho pago por mais tempo. Dá para renovar na última semana.',
+  jwt_vencido:'Sua entrada na conta venceu. Entre de novo.',
   mp_falhou:'O Mercado Pago não respondeu agora. Tente de novo daqui a pouco.',
   config:'O Caderninho ainda não está ligado direito. Fale com quem cuida do app.',
   mfa_teste:'No modo de teste não dá para ligar a proteção em 2 etapas.'
@@ -727,25 +747,36 @@ function codigoErro(j,status){
   if(/email not confirmed/i.test(d))c='email_not_confirmed';
   else if(/invalid login credentials/i.test(d))c='invalid_credentials';
   else if(/already registered/i.test(d))c='user_already_exists';
+  else if(/invalid refresh token/i.test(d))c=/already used/i.test(d)?'refresh_token_already_used':'refresh_token_not_found'; // versões antigas do Supabase: "invalid_grant"
   else if(/password should/i.test(d)&&!ERROS[c])c='weak_password';
   else if(status===401&&!SAIU.includes(c)&&/jwt/i.test(d+' '+c))c='bad_jwt';
   if(!ERROS[c]&&!SAIU.includes(c)&&status===429)c='over_request_rate_limit';
   return c||'erro';
 }
-/* uma chamada ao servidor: Supabase de verdade ou, no modo de teste, o servidor de mentira */
-async function chamar(caminho,{metodo='POST',corpo,token,busca}={}){
+/* uma chamada ao servidor: Supabase de verdade ou, no modo de teste, o servidor de mentira.
+   Sem resposta em "espera" ms (internet ruim, que não cai mas não anda) conta como sem internet. */
+async function chamar(caminho,{metodo='POST',corpo,token,busca,espera=15e3}={}){
   const url=caminho+(busca?'?'+new URLSearchParams(busca):'');
   let r;
   if(modoTeste())r=teste.responder(metodo,url,corpo,token);
   else if(!configurado())throw new ErroConta('config');
   else{
     const h={apikey:CONTA_CHAVE,'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;
-    let x;try{x=await fetch(CONTA_URL.replace(/\/+$/,'')+'/'+url,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined})}
-    catch(e){throw new ErroConta('sem_internet')}
-    let j=null;try{j=await x.json()}catch(e){}
-    r={ok:x.ok,status:x.status,json:j};
+    const ctl=typeof AbortController==='function'?new AbortController():null,tm=ctl&&setTimeout(()=>ctl.abort(),espera);
+    try{
+      let x;try{x=await fetch(CONTA_URL.replace(/\/+$/,'')+'/'+url,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined,signal:ctl?ctl.signal:undefined})}
+      catch(e){throw new ErroConta('sem_internet')}
+      let j=null;try{j=await x.json()}catch(e){if(ctl&&ctl.signal.aborted)throw new ErroConta('sem_internet')}
+      r={ok:x.ok,status:x.status,json:j};
+    }finally{if(tm)clearTimeout(tm)}
   }
-  if(!r.ok){const c=codigoErro(r.json,r.status);if(SAIU.includes(c)){if(token&&sessao&&sessao.access_token===token)guardarSessao(null);throw new ErroConta('sessao')}throw new ErroConta(c)} // resposta velha de outra conta não derruba a atual
+  if(!r.ok){
+    const c=codigoErro(r.json,r.status);
+    /* token recusado (vencido, ou o relógio do celular está errado): quem chamou renova e tenta de novo (logado) */
+    if(c==='bad_jwt'&&token)throw new ErroConta('jwt_vencido');
+    if(SAIU.includes(c)){if(token&&sessao&&sessao.access_token===token)guardarSessao(null);throw new ErroConta('sessao')} // resposta velha de outra conta não derruba a atual
+    throw new ErroConta(c);
+  }
   return r.json||{};
 }
 const auth=(caminho,op)=>chamar('auth/v1/'+caminho,op);
@@ -753,30 +784,63 @@ const volta=()=>({redirect_to:location.origin+location.pathname}); // para onde 
 const jwt=t=>{try{return JSON.parse(atob(String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))}catch(e){return{}}};
 const meuId=()=>sessao?String(jwt(sessao.access_token).sub||(sessao.user&&sessao.user.id)||''):'';
 function lerSessao(){sessao=lerJSON(KEY_CONTA)}
+/* outra janela do app (ou o app instalado e o navegador) entrou, saiu ou renovou a entrada: acompanha */
+window.addEventListener('storage',e=>{
+  if(e.key===KEY_ACESSO){lerAcesso();return}
+  if(e.key!==KEY_CONTA&&e.key!==null)return;
+  const antes=meuId();lerSessao();if(antes!==meuId()){lerAcesso();render();sync.agora()}else atualizarPerfil();
+});
 function guardarSessao(s){
   const antes=meuId();
   sessao=s||null;
   if(sessao)LS.set(KEY_CONTA,JSON.stringify(sessao));else{LS.del(KEY_CONTA);guardarAcesso(null)}
   atualizarPerfil();
-  if(antes!==meuId())setTimeout(render); // entrou ou saiu: troca a tela (portão ou caderninho)
+  if(antes!==meuId())setTimeout(()=>{render();sync.agora()}); // entrou ou saiu: troca a tela (portão ou caderninho) e, se for outra conta, troca as contas
 }
 const sessaoDe=(j,user)=>({access_token:j.access_token,refresh_token:j.refresh_token,expires_at:Number(j.expires_at)||Math.floor(Date.now()/1000)+(Number(j.expires_in)||3600),user:j.user||user||null});
+/* A entrada na conta NUNCA cai por falta de internet, servidor fora do ar, demora ou relógio errado do celular.
+   Só sai da conta quando o servidor diz com certeza que a entrada acabou (SAIU), e mesmo assim só depois de
+   conferir se outra janela do app (ou o app instalado) já não renovou e guardou uma entrada mais nova. */
 let renovando=null;
-function tokenValido(){
+const agoraSeg=()=>(Date.now()+((acesso&&acesso.dif)||0))/1000; // pelo relógio do servidor, quando já se sabe a diferença
+/* outra janela do app pode ter renovado a entrada: usa a mais nova da mesma conta */
+function adotarGuardada(){
+  const g=lerJSON(KEY_CONTA);
+  if(sessao&&g&&g.access_token&&g.refresh_token&&g.refresh_token!==sessao.refresh_token&&String(jwt(g.access_token).sub||'')===meuId()&&(Number(g.expires_at)||0)>=(Number(sessao.expires_at)||0)){sessao=g;return true}
+  return false;
+}
+function tokenValido(forcar){
   if(!sessao)return Promise.reject(new ErroConta('sessao'));
-  if(sessao.expires_at-60>Date.now()/1000)return Promise.resolve(sessao.access_token);
+  const velho=sessao.access_token;
+  if(adotarGuardada()&&forcar&&sessao.access_token!==velho)forcar=false; // a outra janela já trouxe um token novo
+  if(!forcar&&sessao.expires_at-60>agoraSeg())return Promise.resolve(sessao.access_token);
   /* cada renovação fica presa à sessão que a começou: se a pessoa trocou de conta no meio, não grava nem apaga a nova */
   const rt=sessao.refresh_token,mesma=()=>!!sessao&&sessao.refresh_token===rt;
   if(!renovando||renovando.rt!==rt){
     const p=auth('token',{busca:{grant_type:'refresh_token'},corpo:{refresh_token:rt}})
       .then(j=>{if(mesma())guardarSessao(sessaoDe(j,sessao.user));return j.access_token})
-      .catch(e=>{if(e.codigo!=='sem_internet'){if(mesma())guardarSessao(null);throw new ErroConta('sessao')}throw e})
+      .catch(e=>{
+        if(e.codigo!=='sessao')throw e; // sem internet, servidor fora, muitas tentativas…: continua na conta e tenta depois
+        if(mesma()&&adotarGuardada())return sessao.access_token; // "já usado": outra janela renovou primeiro
+        if(mesma())guardarSessao(null);
+        throw e;
+      })
       .finally(()=>{if(renovando===p)renovando=null});
     p.rt=rt;renovando=p;
   }
   return renovando;
 }
-const logado=async(caminho,op)=>chamar(caminho,Object.assign({},op,{token:await tokenValido()}));
+/* pedido com a entrada da conta; se o servidor recusar o token (vencido para ele), renova uma vez e repete */
+async function logado(caminho,op){
+  const com=t=>chamar(caminho,Object.assign({},op,{token:t}));
+  try{return await com(await tokenValido())}
+  catch(e){
+    if(e.codigo!=='jwt_vencido')throw e;
+    const t=await tokenValido(true);
+    try{return await com(t)}
+    catch(e2){if(e2.codigo!=='jwt_vencido')throw e2;throw new ErroConta('erro')} // recusou até o token novinho: problema passageiro do servidor, continua na conta
+  }
+}
 async function atualizarUsuario(){const id=meuId();const u=await logado('auth/v1/user',{metodo:'GET'});if(sessao&&meuId()===id){sessao.user=u;guardarSessao(sessao)}return u} // trocou de conta no meio: não mistura
 /* proteção em 2 etapas: código de 6 números de um aplicativo como o Google Authenticator */
 const fator2=()=>((sessao&&sessao.user&&sessao.user.factors)||[]).find(f=>f.factor_type==='totp'&&f.status==='verified');
@@ -798,36 +862,51 @@ function atualizarPerfil(){
 
 /* ---------- pode usar? (teste grátis ou assinatura) ----------
    acesso = última resposta do servidor, com "dif" (relógio do servidor menos o do celular) para contar o tempo sem internet */
-let acesso=null,erroAcesso=null,conferindo=null,conferindoDe='',precoVitrine=0;
+let acesso=null,erroAcesso=null,conferindo=null,conferindoDe='',vitrine={mensal:0,promo:0,anual:0};
 function lerAcesso(){acesso=lerJSON(KEY_ACESSO)}
 function guardarAcesso(a){acesso=a||null;if(acesso)LS.set(KEY_ACESSO,JSON.stringify(acesso));else LS.del(KEY_ACESSO)}
 const meuAcesso=()=>acesso&&acesso.uid&&acesso.uid===meuId()?acesso:null;
 const agoraServ=()=>Date.now()+((acesso&&acesso.dif)||0);
 const ativaAgora=()=>{const a=meuAcesso();return !!(a&&a.assinatura==='ativa'&&a.valido_ate>agoraServ())};
-const precoAtual=()=>(meuAcesso()&&meuAcesso().preco)||precoVitrine;
+/* plano anual (pagamento único, Pix ou cartão) ainda valendo */
+const anualAgora=()=>{const a=meuAcesso();return !!(a&&a.anual_ate&&a.anual_ate>agoraServ())};
+/* preços: os da conta (o servidor diz se ela ainda tem o 1º mês promocional) ou, antes de entrar, os da tabela de planos.
+   promo = 0: esta conta já usou o 1º mês promocional */
+const precos=()=>{const a=meuAcesso();return a&&a.preco?{mensal:a.preco,promo:a.promo||0,anual:a.anual||vitrine.anual}:vitrine};
 /* datas do Postgres vêm com microssegundos (…:00.123456+00:00): corta em milissegundos para todo navegador entender */
 const lerData=s=>s?Date.parse(String(s).replace(/(\.\d{3})\d+/,'$1'))||0:0;
 function situacaoDe(j,uid){
   const ag=lerData(j.agora);
   return{uid,liberado_ate:lerData(j.liberado_ate),teste_ate:lerData(j.teste_ate),assinatura:j.assinatura||null,
-    valido_ate:lerData(j.valido_ate)||null,preco:Number(j.preco)||0,dif:ag?ag-Date.now():0,em:Date.now()};
+    valido_ate:lerData(j.valido_ate)||null,preco:Number(j.preco)||0,promo:Number(j.preco_promo)||0,anual:Number(j.preco_anual)||0,
+    anual_ate:lerData(j.anual_ate)||null,plano:j.plano||null,dif:ag?ag-Date.now():0,em:Date.now()};
 }
+/* a última conferida falhou por falta de internet (modo avião, sem sinal, servidor sem resposta) */
+const semRede=()=>!!(erroAcesso&&erroAcesso.codigo==='sem_internet');
+/* assinatura mensal ativa que venceu enquanto o celular estava sem internet: o cartão provavelmente já renovou,
+   então dá mais 7 dias de folga até conseguir conferir (o servidor confere assim que a internet voltar) */
+const FOLGA_SEM_REDE=7*864e5;
+const semConferir=()=>!!(erroAcesso&&erroAcesso.codigo!=='sessao'); // sem internet ou servidor com problema (não é a conta que acabou)
+const liberadoAte=a=>a.liberado_ate+(a.assinatura==='ativa'&&semConferir()?FOLGA_SEM_REDE:0);
 /* entrar | codigo | conferindo | assinar | liberado */
 function estadoConta(){
   if(!sessao)return 'entrar';
   if(precisaCodigo())return 'codigo';
+  if(sync.outraConta())return 'conferindo'; // as contas deste celular são de outra conta: espera trocar (nada aparece antes)
   const a=meuAcesso();
   if(!a||Date.now()<a.em-36e5)return 'conferindo'; // ainda sem resposta do servidor, ou o relógio do celular voltou para trás
-  return agoraServ()<a.liberado_ate?'liberado':'assinar';
+  return agoraServ()<liberadoAte(a)?'liberado':'assinar';
 }
-/* pergunta ao servidor; viaMP = pedir para ele conferir direto no Mercado Pago (depois de pagar) */
+/* pergunta ao servidor; viaMP = pedir para ele conferir direto no Mercado Pago (depois de pagar).
+   pagamentoVolta = número do pagamento que o Mercado Pago pôs no endereço de volta (plano anual) */
+let pagamentoVolta='';
 async function verificarAcesso(viaMP){
   while(conferindo){const mesma=conferindoDe===meuId();await conferindo;if(mesma&&!viaMP)return estadoConta()} // outra conta: pergunta de novo
   const antes=estadoConta(),uid=meuId();
   let fim;conferindo=new Promise(r=>{fim=r});conferindoDe=uid;
   if(antes==='conferindo')render();
   try{
-    const j=viaMP?(await logado('functions/v1/assinatura',{corpo:{acao:'conferir'}})).situacao
+    const j=viaMP?(await logado('functions/v1/assinatura',{corpo:Object.assign({acao:'conferir'},pagamentoVolta?{pagamento_id:pagamentoVolta}:{})})).situacao
                  :await logado('rest/v1/rpc/minha_situacao',{corpo:{}});
     if(!j||!j.liberado_ate)throw new ErroConta('pedido');
     if(uid&&meuId()===uid){guardarAcesso(situacaoDe(j,uid));erroAcesso=null} // trocou de conta no meio: descarta a resposta da outra
@@ -837,10 +916,14 @@ async function verificarAcesso(viaMP){
   if(depois!==antes||depois!=='liberado')render(); // não redesenha à toa: quem está digitando uma venda não perde nada
   return depois;
 }
-/* preço para mostrar antes de entrar (a tabela de planos é pública) */
+/* preços para mostrar antes de entrar (a tabela de planos é pública) */
 async function carregarPreco(){
-  if(precoVitrine)return;
-  try{const j=await chamar('rest/v1/planos',{metodo:'GET',busca:{select:'valor',id:'eq.mensal'}});const v=Number(j&&j[0]&&j[0].valor);if(v>0){precoVitrine=v;if(estadoConta()==='entrar')render()}}catch(e){}
+  if(vitrine.mensal)return;
+  try{
+    const j=await chamar('rest/v1/planos',{metodo:'GET',busca:{select:'id,valor',ativo:'eq.true'}});
+    const v=id=>{const x=(Array.isArray(j)?j:[]).find(l=>l&&l.id===id);return Number(x&&x.valor)||0};
+    if(v('mensal')>0){vitrine={mensal:v('mensal'),promo:v('mensal_promo'),anual:v('anual')};if(estadoConta()==='entrar')render()}
+  }catch(e){}
 }
 const quando=ms=>new Date(ms).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
 const quandoHora=ms=>new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -848,45 +931,66 @@ function faltaTxt(ms){if(ms<=0)return 'acabou';const h=Math.ceil(ms/36e5);if(h<=
 function situacaoTxt(){
   const a=meuAcesso();if(!a)return['Conferindo…','neutra'];
   const ag=agoraServ();
-  if(a.assinatura==='ativa'&&a.valido_ate)return a.valido_ate>ag?[`Ativa, renova em ${quando(a.valido_ate)}`,'good']:a.liberado_ate>ag?['Pagamento atrasado','warn']:['Venceu','bad'];
+  if(a.anual_ate&&a.anual_ate>ag&&!ativaAgora())return[`Plano anual, vale até ${quando(a.anual_ate)}`,'good'];
+  if(a.assinatura==='ativa'&&a.valido_ate)return a.valido_ate>ag?[`Mensal ativa, renova em ${quando(a.valido_ate)}`,'good']:liberadoAte(a)>ag?['Pagamento atrasado','warn']:['Venceu','bad'];
   if(a.valido_ate>ag)return[`${a.assinatura==='pausada'?'Pausada':a.assinatura==='cancelada'?'Cancelada':'Paga'}, vale até ${quando(a.valido_ate)}`,'warn'];
   if(ag<a.teste_ate)return[`Teste grátis até ${quandoHora(a.teste_ate)}`,'warn'];
   return['Sem assinatura','bad'];
 }
-/* aviso no alto do Resumo: dias de teste, pagamento atrasado ou assinatura cancelada */
+/* aviso no alto do Resumo: dias de teste, pagamento atrasado, assinatura cancelada ou plano anual acabando */
 function bannerAssinatura(){
   const a=meuAcesso();if(!a)return '';const ag=agoraServ();
   if(ativaAgora())return '';
-  if(a.assinatura==='ativa'&&a.liberado_ate>ag)return `<div class="banner aviso-pag"><span style="flex:1">Não chegou o pagamento deste mês. Confira o cartão no Mercado Pago para não parar de usar.</span><button data-act="assinConferir">Conferir</button></div>`;
+  if(anualAgora()){const f=a.anual_ate-ag;return f<=7*864e5?`<div class="banner aviso-pag"><span style="flex:1">Seu plano anual acaba em ${quando(a.anual_ate)} (${faltaTxt(f)}).</span><button data-act="assinar">Renovar</button></div>`:''}
+  if(a.assinatura==='ativa'&&liberadoAte(a)>ag)return semConferir()?'':`<div class="banner aviso-pag"><span style="flex:1">Não chegou o pagamento deste mês. Confira o cartão no Mercado Pago para não parar de usar.</span><button data-act="assinConferir">Conferir</button></div>`;
   if(ag<a.teste_ate)return `<div class="banner" data-gratis><span style="flex:1"><b>Teste grátis:</b> ${faltaTxt(a.teste_ate-ag)}.</span><button data-act="assinar">Assinar</button></div>`;
   if(a.valido_ate>ag)return `<div class="banner aviso-pag"><span style="flex:1">Sua assinatura ${a.assinatura==='pausada'?'foi pausada e ':a.assinatura==='cancelada'?'foi cancelada e ':''}vale até ${quando(a.valido_ate)}.</span><button data-act="assinar">Assinar de novo</button></div>`;
   return '';
 }
+/* os dois planos, para escolher. Mensal: cartão, renova sozinho (1º mês promocional só uma vez por conta).
+   Anual: pagamento único no Pix ou no cartão, vale 12 meses e não renova sozinho. */
+let planoEscolhido='mensal';
+const economia=p=>p.mensal>0&&p.anual>0?Math.round((1-p.anual/(12*p.mensal))*100):0;
+function cartoesPlanos(){
+  const p=precos(),eco=economia(p),sel=v=>`aria-pressed="${planoEscolhido===v}"`;
+  const mensal=p.promo>0&&p.promo<p.mensal
+    ?`<span class="big num">${brl(p.promo)}</span><span class="depois">no 1º mês, depois ${brl(p.mensal)} por mês</span>`
+    :`<span class="big num">${p.mensal?brl(p.mensal):'…'}</span><span class="depois">por mês</span>`;
+  return `<div class="planos" role="group" aria-label="Escolha o plano">
+    <button type="button" class="plano" data-act="assinPlano" data-v="mensal" ${sel('mensal')}><span class="lbl">Mensal</span>${mensal}<span class="muted small">No cartão de crédito. Renova sozinho todo mês. Cancele quando quiser.</span></button>
+    <button type="button" class="plano" data-act="assinPlano" data-v="anual" ${sel('anual')}>${eco>0?`<span class="pill good eco">Economize ${eco}%</span>`:''}<span class="lbl">Anual</span><span class="big num">${p.anual?brl(p.anual):'…'}</span><span class="depois">por 12 meses${p.anual?` (sai ${brl(r2(p.anual/12))} por mês)`:''}</span><span class="muted small">No Pix ou no cartão (dá para parcelar). Paga uma vez e não renova sozinho.</span></button>
+  </div>`;
+}
+function ofertaTxt(){
+  const p=precos();if(!p.mensal)return 'Depois, assinatura mensal ou anual. Cancele quando quiser.';
+  return `Depois, ${p.promo>0&&p.promo<p.mensal?`${brl(p.promo)} no 1º mês e ${brl(p.mensal)} por mês`:`${brl(p.mensal)} por mês`}${p.anual?`, ou ${brl(p.anual)} por ano`:''}. Cancele quando quiser.`;
+}
 /* o "portão": o que aparece no lugar do caderninho quando a pessoa ainda não pode usar */
 function vPortao(est){
   const sair=`<button class="linkbtn" data-act="contaSair">Sair da conta</button>`;
-  if(est==='entrar'){const p=precoAtual();return `<section class="portao" id="portao" data-estado="entrar">
+  if(est==='entrar')return `<section class="portao" id="portao" data-estado="entrar">
     <span class="selo">${IC.livro}</span>
     <h1>Boas-vindas ao Caderninho</h1>
     <p class="muted">Anote quem comprou fiado, quanto deve e quem já pagou. As contas o Caderninho faz sozinho.</p>
-    <div class="card oferta"><b>${DIAS_GRATIS} dias grátis</b><span class="muted small">${p?`Depois, ${brl(p)} por mês. `:'Depois, assinatura mensal. '}Cancele quando quiser.</span></div>
+    <div class="card oferta"><b>${DIAS_GRATIS} dias grátis</b><span class="muted small">${ofertaTxt()}</span></div>
     <button class="btn" data-act="contaCriar">Criar minha conta</button>
     <button class="btn ghost" data-act="contaEntrar">Já tenho conta: entrar</button>
-    <p class="muted small">Para usar o Caderninho, crie sua conta com seu nome, e-mail e uma senha. Suas vendas, clientes e produtos ficam guardados neste celular.</p>
-  </section>`}
+    <p class="muted small">Para usar o Caderninho, crie sua conta com seu nome, e-mail e uma senha. Suas vendas, clientes e produtos ficam guardados neste celular e na sua conta: se trocar de celular, é só entrar de novo. E dá para usar em mais de um celular ao mesmo tempo.</p>
+  </section>`;
   if(est==='codigo')return `<section class="portao" id="portao" data-estado="codigo"><span class="selo">${IC.livro}</span><h1>Falta o código de segurança</h1>
     <p class="muted">Sua conta tem proteção em 2 etapas. Digite o código do aplicativo de códigos para continuar.</p>
     <button class="btn" data-act="contaCodigoAbrir">Digitar o código</button>${sair}</section>`;
-  if(est==='conferindo'){const e=!conferindo&&erroAcesso;return `<section class="portao" id="portao" data-estado="conferindo"><span class="selo">${IC.livro}</span>${e?`<h1>Não deu para conferir sua conta</h1>
+  if(est==='conferindo'){const e=!conferindo&&erroAcesso;return `<section class="portao" id="portao" data-estado="conferindo"><span class="selo">${IC.livro}</span>${e?`<h1>${semRede()?'Ligue a internet uma vez':'Não deu para conferir sua conta'}</h1>
     <p class="muted">${esc(msgErro(e))}</p>
-    <p class="muted small">Na primeira vez, e de vez em quando, o Caderninho precisa de internet para conferir o teste grátis ou a assinatura. Suas contas continuam guardadas neste celular.</p>
+    <p class="muted small">Na primeira vez, e quando o relógio do celular muda, o Caderninho precisa de internet para conferir o teste grátis ou a assinatura. Você continua na sua conta e suas contas continuam guardadas neste celular.</p>
     <button class="btn" data-act="assinRecarregar">Tentar de novo</button>${sair}`:`<h1>Conferindo sua conta…</h1><p class="muted">Só um instante.</p>`}</section>`}
-  const a=meuAcesso(),p=precoAtual();
+  const a=meuAcesso();
   return `<section class="portao" id="portao" data-estado="assinar">
     <span class="selo">${IC.livro}</span>
-    <h1>${a&&(a.valido_ate||a.assinatura&&a.assinatura!=='pendente')?'Sua assinatura terminou':'Seu teste grátis acabou'}</h1>
-    <p class="muted">Para continuar usando o Caderninho, faça a assinatura. Suas contas estão guardadas neste celular e voltam assim que a assinatura começar.</p>
-    <div class="card preco"><span class="lbl">Assinatura mensal</span><div class="big num">${p?brl(p):'…'}</div><span class="muted small">por mês. Cancele quando quiser.</span></div>
+    <h1>${a&&(a.valido_ate||a.anual_ate||a.assinatura&&a.assinatura!=='pendente')?'Sua assinatura terminou':'Seu teste grátis acabou'}</h1>
+    <p class="muted">Para continuar usando o Caderninho, escolha um plano. Suas contas estão guardadas e voltam assim que o pagamento for confirmado.</p>
+    ${semRede()?'<p class="aviso neutra">Você está sem internet agora. Se já pagou, ligue a internet e toque em “Já paguei, conferir”.</p>':''}
+    ${cartoesPlanos()}
     ${a&&a.assinatura==='pendente'?'<p class="aviso neutra">Começou a assinatura e não terminou? É só tocar em “Assinar agora” de novo.</p>':''}
     <button class="btn" data-act="assinar">Assinar agora</button>
     <button class="btn soft" data-act="assinConferir">Já paguei, conferir</button>
@@ -951,6 +1055,7 @@ function formNome(){abrir(`<form><h1>Mudar meu nome</h1>
 function telaMinhaConta(){
   const u=sessao&&sessao.user;if(!u)return formEntrar();
   const nome=nomeDe(u),conf=!!(u.email_confirmed_at||u.confirmed_at),dois=!!fator2(),[st,cor]=situacaoTxt();
+  const a=meuAcesso(),renovar=anualAgora()&&a.anual_ate-agoraServ()<=7*864e5; // o servidor deixa renovar na última semana
   abrir(`<h1 id="telaConta">Minha conta</h1>
   <div class="card" style="display:flex;align-items:center;gap:12px">${avatar(nome||u.email)}<span class="grow"><span class="name">${esc(nome||'Sem nome')}</span><span class="sub">${esc(u.email)}</span></span></div>
   <div class="list">
@@ -959,15 +1064,28 @@ function telaMinhaConta(){
     ${modoTeste()?'':`<div class="item"><span class="grow">Proteção em 2 etapas</span>${dois?'<span class="pill good">Ligada</span>':'<span class="pill neutra">Desligada</span>'}</div>`}
     ${u.created_at?`<div class="item"><span class="grow">Conta criada em</span><span class="val">${esc(quando(Date.parse(u.created_at)))}</span></div>`:''}
   </div>
-  ${ativaAgora()?'<button class="btn soft" data-act="assinCancelarComo">Como cancelar a assinatura</button>':'<button class="btn" data-act="assinar">Assinar o Caderninho</button>'}
+  ${ativaAgora()?'<button class="btn soft" data-act="assinCancelarComo">Como cancelar a assinatura</button>':anualAgora()?(renovar?'<button class="btn soft" data-act="assinar">Renovar o plano anual</button>':''):'<button class="btn" data-act="assinar">Assinar o Caderninho</button>'}
   ${conf?'':'<button class="btn" data-act="contaReenviar">Mandar o e-mail de confirmação de novo</button>'}
+  ${blocoOutroCelular()}
   <button class="btn soft" data-act="contaNome">Mudar meu nome</button>
   <button class="btn soft" data-act="contaSenha">Trocar minha senha</button>
   ${modoTeste()?'':`<button class="btn soft" data-act="conta2fa">${dois?'Desligar':'Ligar'} a proteção em 2 etapas</button>`}
   <button class="btn ghost" data-act="contaSair">Sair da conta</button>
-  <p class="muted small" style="margin:0">Suas vendas, clientes e produtos ficam guardados neste celular. Sair da conta não apaga nada.</p>
-  <button class="btn ghost" data-act="fechar">Fechar</button>`)}
-function contaPronto(msg){const d=depoisCodigo;depoisCodigo=null;if(d)return d();fechar();render();if(msg)toast(msg);verificarAcesso()}
+  <p class="muted small" style="margin:0">Suas vendas, clientes e produtos ficam guardados neste celular e na sua conta. Sair da conta não apaga nada.</p>
+  <button class="btn ghost" data-act="fechar">Fechar</button>`);
+  sync.agora();
+}
+/* "guardado na sua conta" e como usar em outro celular (Minha conta e Ajustes) */
+function blocoOutroCelular(){
+  const t=syncTxt();if(!t)return '';
+  return `<div class="card" id="syncInfo" style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;align-items:center;gap:8px"><b class="grow">Guardado na sua conta</b><span class="pill ${t[1]}">${esc(t[0])}</span></div>
+    <p class="muted small" style="margin:0" id="syncTxt">${esc(t[2])}</p>
+    <p class="small" style="margin:0"><b>Usar em outro celular:</b> abra o Caderninho no outro celular e entre com este mesmo e-mail e senha. As vendas, os clientes e os produtos aparecem lá, e o que você anotar em um aparece no outro.</p>
+    <p class="muted small" style="margin:0">Perdeu ou trocou de celular? É só entrar na sua conta no celular novo: tudo volta.</p>
+  </div>`;
+}
+function contaPronto(msg){const d=depoisCodigo;depoisCodigo=null;if(d)return d();fechar();render();if(msg)toast(msg);verificarAcesso().then(()=>sync.agora())}
 const oi=()=>{const n=nomeDe(sessao&&sessao.user);return `Que bom te ver${n?', '+n.split(' ')[0]:''}!`};
 function tela2fa(){abrir(`<h1>Proteção em 2 etapas</h1>
   <p class="muted" style="margin:0">Além da senha, o Caderninho vai pedir um código de 6 números quando você entrar na conta. O código aparece num aplicativo grátis, como o <b>Google Authenticator</b> ou o <b>Microsoft Authenticator</b>. Assim, mesmo que alguém descubra sua senha, não consegue entrar.</p>
@@ -987,31 +1105,41 @@ function tela2faChave(){
   <button type="button" class="btn ghost" data-act="conta">Cancelar</button></form>`)}
 
 /* telas da assinatura */
-const cartaoPreco=p=>`<div class="card preco"><span class="lbl">Assinatura mensal</span><div class="big num">${p?brl(p):'…'}</div><span class="muted small">por mês. Cancele quando quiser.</span></div>`;
+const precoDoPlano=(plano,p=precos())=>plano==='anual'?p.anual:(p.promo>0&&p.promo<p.mensal?p.promo:p.mensal);
 function telaAssinar(){
-  const p=precoAtual(),u=sessao&&sessao.user;
+  const p=precos(),u=sessao&&sessao.user,anual=planoEscolhido==='anual';
   abrir(`<form><h1>Assinar o Caderninho</h1>
-  ${cartaoPreco(p)}
-  <p class="muted" style="margin:0">O pagamento é feito no site do <b>Mercado Pago</b>, com segurança. A cobrança se repete todo mês, sozinha, até você cancelar.</p>
-  ${campo('pEmail','E-mail da sua conta do Mercado Pago',`type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(u&&u.email)}"`,'Se no Mercado Pago você usa outro e-mail, troque aqui.')}
-  <button class="btn" data-act="assinIr">Ir para o pagamento</button>
+  ${cartoesPlanos()}
+  <p class="muted" style="margin:0" id="assinComo">${anual
+    ?'O pagamento é feito no site do <b>Mercado Pago</b>, com segurança: <b>Pix</b> ou cartão (dá para parcelar). Vale por 12 meses e não é cobrado de novo sozinho: perto do fim o Caderninho avisa para renovar.'
+    :`O pagamento é feito no site do <b>Mercado Pago</b>, com segurança, no cartão de crédito. ${p.promo>0&&p.promo<p.mensal?`Hoje você paga ${brl(p.promo)}; a partir do 2º mês, ${brl(p.mensal)} por mês, sozinho, até você cancelar.`:'A cobrança se repete todo mês, sozinha, até você cancelar.'}`}</p>
+  ${campo('pEmail','E-mail da sua conta do Mercado Pago',`type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(($('#pEmail')&&$('#pEmail').value)||(u&&u.email))}"`,'Se no Mercado Pago você usa outro e-mail, troque aqui.')}
+  <button class="btn" data-act="assinIr">Ir para o pagamento${precoDoPlano(planoEscolhido,p)?' de '+brl(precoDoPlano(planoEscolhido,p)):''}</button>
   <button type="button" class="btn ghost" data-act="fechar">Agora não</button></form>`);
-  if(!p)verificarAcesso().then(()=>{if($('#pEmail')&&precoAtual())telaAssinar()});
+  if(!p.mensal)verificarAcesso().then(()=>{if($('#pEmail')&&precos().mensal)telaAssinar()});
 }
 function telaComoCancelar(){abrir(`<h1>Cancelar a assinatura</h1>
   <p style="margin:0">A assinatura é cobrada pelo <b>Mercado Pago</b>. Para cancelar, abra o aplicativo ou o site do Mercado Pago, entre em <b>Assinaturas</b>, escolha o Caderninho e toque em <b>Cancelar</b>.</p>
-  <p class="muted" style="margin:0">Você continua usando até o fim do mês que já pagou. Suas contas continuam guardadas neste celular.</p>
+  <p class="muted" style="margin:0">Você continua usando até o fim do mês que já pagou. Suas contas continuam guardadas neste celular e na sua conta.</p>
+  <p class="muted small" style="margin:0">Quer trocar para o plano anual? Cancele a mensal e, quando ela acabar, escolha o anual.</p>
   ${modoTeste()?'<button class="btn danger" data-act="testeCancelar">Cancelar agora (modo de teste)</button>':'<a class="btn soft" href="https://www.mercadopago.com.br/subscriptions" target="_blank" rel="noopener">Abrir minhas assinaturas no Mercado Pago</a>'}
   <button class="btn ghost" data-act="conta">Voltar</button>`)}
-function telaPagTeste(){abrir(`<h1>Pagamento de teste</h1>
+function telaPagTeste(plano){const p=precos(),v=precoDoPlano(plano,p)||(plano==='anual'?teste.ANUAL:teste.PROMO);abrir(`<h1>Pagamento de teste</h1>
   <p class="muted" style="margin:0">No app de verdade, aqui abre o site do Mercado Pago. No modo de teste nada é cobrado: escolha o que acontece.</p>
-  ${cartaoPreco(precoAtual()||teste.PRECO)}
-  <button class="btn good" data-act="testePagar">${IC.ok}Pagamento aprovado</button>
+  <div class="card preco"><span class="lbl">${plano==='anual'?'Plano anual (12 meses)':'Assinatura mensal'}</span><div class="big num">${brl(v)}</div><span class="muted small">${plano==='anual'?'Pix ou cartão, uma vez só.':p.promo>0&&p.promo<p.mensal?`no 1º mês, depois ${brl(p.mensal)} por mês.`:'por mês.'}</span></div>
+  <button class="btn good" data-act="testePagar" data-v="${plano==='anual'?'anual':'mensal'}">${IC.ok}Pagamento aprovado</button>
   <button class="btn ghost" data-act="fechar">Desistir (não pagar)</button>`)}
-/* voltou do Mercado Pago? O endereço de volta traz ?preapproval_id=…, e o app marca a saída em caderninho-pagando */
+/* voltou do Mercado Pago? A mensal volta com ?preapproval_id=…; o anual (Checkout Pro) com ?payment_id=…&status=…
+   (ou collection_id). O app também marca a saída em caderninho-pagando. */
 function voltouDoPagamento(){
-  const q=new URLSearchParams(location.search),veio=q.has('preapproval_id');
-  if(veio)try{history.replaceState(null,'',location.pathname+location.hash)}catch(e){}
+  const q=new URLSearchParams(location.search),pag=q.get('payment_id')||q.get('collection_id')||'';
+  const veio=q.has('preapproval_id')||!!pag||q.has('preference_id');
+  if(/^\d{1,30}$/.test(pag))pagamentoVolta=pag;
+  if(veio){
+    const st=q.get('status')||q.get('collection_status')||'';
+    if(/rejected|failure|cancelled/i.test(st))setTimeout(()=>toast('O pagamento não foi aprovado. Você pode tentar de novo com outra forma de pagamento.',true),600);
+    try{history.replaceState(null,'',location.pathname+location.hash)}catch(e){}
+  }
   const marcou=Number(LS.get(KEY_PAGANDO))||0;
   if(marcou&&Date.now()-marcou>864e5)LS.del(KEY_PAGANDO);
   return veio||(marcou>0&&Date.now()-marcou<=864e5);
@@ -1024,8 +1152,8 @@ function voltouDoPagamento(){
    Tudo fica em localStorage['caderninho-teste']; o relógio de teste ("adianto") anda pelo painel 🧪. */
 const novoId=()=>{try{return crypto.randomUUID()}catch(e){return 'teste-'+uid()+uid()}};
 const teste={
-  PRECO:9.9,DIA:864e5,
-  dados(){const d=lerJSON(KEY_TESTE)||{};return{contas:Array.isArray(d.contas)?d.contas:[],adianto:Number(d.adianto)||0}},
+  PRECO:19.9,PROMO:14.9,ANUAL:149.9,DIA:864e5,
+  dados(){const d=lerJSON(KEY_TESTE)||{};return{contas:Array.isArray(d.contas)?d.contas:[],adianto:Number(d.adianto)||0,sync:d.sync&&typeof d.sync==='object'?d.sync:{}}},
   gravar(d){LS.set(KEY_TESTE,JSON.stringify(d))},
   agora(){return Date.now()+this.dados().adianto},
   conta(id){return id?this.dados().contas.find(c=>c.id===id)||null:null},
@@ -1038,13 +1166,29 @@ const teste={
   situacao(id){
     const c=this.mudar(id,x=>{const a=x.assin;if(a&&a.status==='ativa'&&a.valido_ate)while(a.valido_ate<=this.agora())a.valido_ate=this.mes(a.valido_ate)}); // cobra o mês seguinte sozinho
     if(!c)return null;
-    const iso=ms=>new Date(ms).toISOString(),a=c.assin,teste_ate=c.criado+DIAS_GRATIS*this.DIA;
-    let lib=teste_ate;
+    const iso=ms=>new Date(ms).toISOString(),a=c.assin,teste_ate=c.criado+DIAS_GRATIS*this.DIA,anual=Number(c.anualAte)||0;
+    let lib=Math.max(teste_ate,anual);
     if(a&&a.valido_ate){if(a.status==='ativa')lib=Math.max(lib,a.valido_ate+3*this.DIA);else lib=Math.max(lib,a.valido_ate)} // pausada, cancelada ou pendente: vale até o fim do que já foi pago
-    return{agora:iso(this.agora()),teste_ate:iso(teste_ate),assinatura:a?a.status:null,valido_ate:a&&a.valido_ate?iso(a.valido_ate):null,liberado_ate:iso(lib),preco:this.PRECO};
+    const ag=this.agora(),plano=anual>ag?'anual':a?'mensal':null;
+    return{agora:iso(ag),teste_ate:iso(teste_ate),assinatura:a?a.status:null,valido_ate:a&&a.valido_ate?iso(a.valido_ate):null,liberado_ate:iso(lib),
+      preco:this.PRECO,preco_promo:c.promoUsada?null:this.PROMO,preco_anual:this.ANUAL,anual_ate:anual?iso(anual):null,plano};
   },
-  aprovar(id){this.mudar(id,c=>{c.assin={status:'ativa',valido_ate:this.mes(this.agora())}})},
+  /* mensal: 1º mês promocional (só uma vez por conta), depois o preço cheio. Anual: 12 meses a partir de hoje ou do fim
+     do anual que ainda vale. */
+  aprovar(id,plano){this.mudar(id,c=>{
+    if(plano==='anual'){c.anualAte=Math.max(this.agora(),Number(c.anualAte)||0)+365*this.DIA;return}
+    c.assin={status:'ativa',valido_ate:this.mes(this.agora())};c.promoUsada=true;
+  })},
   cancelar(id){this.mudar(id,c=>{if(c.assin&&c.assin.status==='ativa')c.assin.status='cancelada'})},
+  /* o mesmo que public.sincronizar faz no servidor (só que tudo neste aparelho) */
+  sincronizar(c,b){
+    const d=this.dados(),s=d.sync[c.id]||(d.sync[c.id]={rev:0,regs:{}}),muds=Array.isArray(b.mudancas)?b.mudancas:[];
+    if(muds.length>500||muds.some(m=>!m||!COLECOES.includes(m.c)||!m.id||(!m.x&&(!m.d||typeof m.d!=='object'))))return{ok:false,status:400,json:{code:'P0001',message:'mudancas_invalidas'}};
+    if(muds.length){s.rev++;for(const m of muds)s.regs[m.c+'/'+m.id]={c:m.c,id:String(m.id),d:m.x?null:JSON.parse(JSON.stringify(m.d)),x:!!m.x,r:s.rev}}
+    const desde=Number(b.desde)||0,mudancas=Object.values(s.regs).filter(r=>r.r>desde).sort((x,y)=>x.r-y.r).map(({c,id,d,x})=>({c,id,d,x}));
+    this.gravar(d);
+    return{ok:true,status:200,json:{rev:s.rev,mudancas,mais:false,agora:new Date(this.agora()).toISOString()}};
+  },
   responder(metodo,url,corpo,token){
     const ok=json=>({ok:true,status:200,json}),erro=(status,codigo)=>({ok:false,status,json:{error_code:codigo,msg:codigo}});
     const [caminho,qs]=url.split('?'),q=new URLSearchParams(qs||''),b=corpo||{},d=this.dados();
@@ -1064,12 +1208,16 @@ const teste={
         return ok(this.usuario(this.conta(c.id)));}
       case 'POST auth/v1/recover':case 'POST auth/v1/resend':case 'POST auth/v1/logout':return ok({});
       case 'POST auth/v1/factors':return erro(400,'mfa_teste');
-      case 'GET rest/v1/planos':return ok([{valor:this.PRECO}]);
+      case 'GET rest/v1/planos':return ok([{id:'mensal',valor:this.PRECO},{id:'mensal_promo',valor:this.PROMO},{id:'anual',valor:this.ANUAL}]);
       case 'POST rest/v1/rpc/minha_situacao':{const c=quem();return c?ok(this.situacao(c.id)):erro(401,'bad_jwt')}
+      case 'POST rest/v1/rpc/sincronizar':{const c=quem();return c?this.sincronizar(c,b):erro(401,'bad_jwt')}
       case 'POST functions/v1/assinatura':{
         const c=quem();if(!c)return{ok:false,status:401,json:{erro:'sem_login'}};
         if(b.acao==='criar'){
-          if(c.assin&&c.assin.status==='ativa'&&c.assin.valido_ate>this.agora())return{ok:false,status:409,json:{erro:'ja_ativa'}};
+          const ag=this.agora(),ativa=c.assin&&c.assin.status==='ativa'&&c.assin.valido_ate>ag;
+          if(b.plano==='anual'){if(ativa)return{ok:false,status:409,json:{erro:'ja_ativa'}};return ok({init_point:'#teste-pagamento-anual'})}
+          if(ativa)return{ok:false,status:409,json:{erro:'ja_ativa'}};
+          if((Number(c.anualAte)||0)>ag+7*this.DIA)return{ok:false,status:409,json:{erro:'ja_paga'}};
           if(!c.assin)this.mudar(c.id,x=>{x.assin={status:'pendente',valido_ate:null}});
           return ok({init_point:'#teste-pagamento'});}
         if(b.acao==='conferir')return ok({situacao:this.situacao(c.id)});
@@ -1193,16 +1341,29 @@ async function acaoConta(a,b){
       if(t)auth('logout',{busca:{scope:'local'},token:t}).catch(()=>{});
       toast('Você saiu da conta. Suas contas continuam neste celular.'); break;}
     /* assinatura */
-    case 'assinar': if(!sessao)return formEntrar(); if(ativaAgora())return toast(ERROS.ja_ativa); telaAssinar(); break;
+    case 'assinar': {
+      if(!sessao)return formEntrar();
+      if(ativaAgora())return toast(ERROS.ja_ativa);
+      const a=meuAcesso();if(anualAgora()&&a.anual_ate-agoraServ()>7*864e5)return toast(`Seu plano anual vale até ${quando(a.anual_ate)}. Dá para renovar na última semana.`);
+      if(anualAgora())planoEscolhido='anual'; // renovar o anual
+      if($('#portao')){const s=$('#portao [data-act="assinPlano"][aria-pressed="true"]');if(s)planoEscolhido=s.dataset.v}
+      telaAssinar(); break;}
+    case 'assinPlano': {
+      planoEscolhido=b.dataset.v==='anual'?'anual':'mensal';
+      if($('#pEmail'))telaAssinar(); else document.querySelectorAll('[data-act="assinPlano"]').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===planoEscolhido));
+      break;}
     case 'assinIr': {
-      const email=$('#pEmail').value.trim().toLowerCase();
+      const email=$('#pEmail').value.trim().toLowerCase(),plano=planoEscolhido;
       if(!emailOk(email))return pedirCampo('#pEmail','Confira o e-mail. Ex.: ana@gmail.com');
       await comBotao(b,'Abrindo o pagamento…',async()=>{
         let j;
-        try{j=await logado('functions/v1/assinatura',{corpo:{acao:'criar',volta:location.origin+location.pathname,email_pagador:email}})}
-        catch(e){if(e.codigo==='ja_ativa'){fechar();await verificarAcesso(true);toast(msgErro(e));return}throw e}
+        try{j=await logado('functions/v1/assinatura',{corpo:{acao:'criar',plano,volta:location.origin+location.pathname,email_pagador:email}})}
+        catch(e){
+          if(e.codigo==='ja_ativa'&&plano==='anual'){fechar();toast('Sua assinatura mensal está ativa. Para trocar para o anual, cancele a mensal no Mercado Pago e escolha o anual quando ela acabar.',true);return}
+          if(e.codigo==='ja_ativa'||e.codigo==='ja_paga'){fechar();await verificarAcesso(true);toast(msgErro(e));return}
+          throw e}
         const url=String(j.init_point||'');
-        if(modoTeste()&&url==='#teste-pagamento')return telaPagTeste();
+        if(modoTeste()&&/^#teste-pagamento/.test(url))return telaPagTeste(plano);
         if(!/^https:\/\/([a-z0-9-]+\.)*mercadopago\.com(\.br)?\//i.test(url))throw new ErroConta('mp_falhou'); // só sai do app para o Mercado Pago
         LS.set(KEY_PAGANDO,String(Date.now()));
         location.href=url;
@@ -1210,8 +1371,8 @@ async function acaoConta(a,b){
       break;}
     case 'assinConferir': await comBotao(b,'Conferindo…',async()=>{
         await verificarAcesso(true);if(erroAcesso)throw erroAcesso;
-        if(ativaAgora()){LS.del(KEY_PAGANDO);toast('Assinatura confirmada! Obrigado.')}
-        else toast('Ainda não chegou a confirmação do Mercado Pago. Pode levar alguns minutos.',true);
+        if(ativaAgora()||anualAgora()){LS.del(KEY_PAGANDO);pagamentoVolta='';toast(anualAgora()&&!ativaAgora()?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.')}
+        else toast('Ainda não chegou a confirmação do Mercado Pago. Pode levar alguns minutos (no Pix, quase na hora).',true);
       }); break;
     case 'assinRecarregar': verificarAcesso(); break;
     case 'assinCancelarComo': telaComoCancelar(); break;
@@ -1227,7 +1388,7 @@ async function acaoConta(a,b){
         const alvo=c.criado+DIAS_GRATIS*teste.DIA+60e3-Date.now();if(alvo<=d.adianto)return toast('O teste grátis dessa conta já acabou.',true);d.adianto=alvo}
       teste.gravar(d);await depoisDoTeste(a==='testeRelogio'?'Relógio de volta para agora':'O relógio de teste andou');break;}
     case 'testeCancelar': if(!modoTeste())return; teste.cancelar(meuId()); await depoisDoTeste('Assinatura de teste cancelada'); break;
-    case 'testePagar': if(!modoTeste())return; teste.aprovar(meuId()); fechar(); await verificarAcesso(true); toast('Assinatura confirmada! Obrigado.'); break;
+    case 'testePagar': { if(!modoTeste())return; const anual=b.dataset.v==='anual'; teste.aprovar(meuId(),anual?'anual':'mensal'); fechar(); await verificarAcesso(true); toast(anual?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.'); break;}
     case 'testeZerar': if(!modoTeste())return;
       perguntar('Apagar as contas de teste?','Todas as contas criadas no modo de teste somem e o relógio volta para agora. As vendas, clientes e produtos do caderninho não são apagados.','Sim, apagar',()=>{LS.del(KEY_TESTE);fechar();guardarSessao(null);render();toast('Contas de teste apagadas')});
       break;
@@ -1249,6 +1410,190 @@ async function voltouDoEmail(){
   contaPronto(tipo==='signup'?'E-mail confirmado! Sua conta está pronta.':'Pronto, você entrou na sua conta');
   return true;
 }
+
+/* ---------- guardar na conta: os mesmos dados em vários celulares ----------
+   O caderninho vira uma lista de registros {c (coleção), id, d (dados)}: produtos, clientes, lanc, contas, materiais,
+   receitas e config (ajustes e as contas fixas da planilha). Cada celular guarda à parte (caderninho-sync) a
+   "impressão" de cada registro na última vez que conversou com a conta (base) e até onde já recebeu (rev).
+   Impressão diferente da base = mudou neste celular e sobe; o que os outros celulares mudaram desce.
+   Registro mexido aqui e ainda não subido não é trocado pelo que desce: sobe depois e vale o último.
+   Apagar vira "lápide" (x:true), para os outros celulares apagarem também.
+   Servidor: public.sincronizar (supabase/migrations/202611020001_sincronizar.sql). Nada disso aparece com esse nome
+   nas telas: para a pessoa é "guardado na sua conta". */
+const KEY_SYNC='caderninho-sync',KEY_APARELHO='caderninho-aparelho';
+const COLECOES=['produtos','clientes','lanc','contas','materiais','receitas','config'];
+const SYNC_LOTE=500,SYNC_BYTES=9e5,SYNC_PAUSA=1500,SYNC_INTERVALO=20e3;
+/* JSON com as chaves em ordem: o mesmo registro dá a mesma impressão, venha deste celular ou do servidor
+   (o banco devolve as chaves em outra ordem) */
+function canon(v){
+  if(v===null||typeof v!=='object'){const s=JSON.stringify(v);return s===undefined?'null':s}
+  if(Array.isArray(v))return '['+v.map(canon).join(',')+']';
+  return '{'+Object.keys(v).filter(k=>v[k]!==undefined&&typeof v[k]!=='function').sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';
+}
+function impressao(v){
+  const s=canon(v);let h1=0xdeadbeef,h2=0x41c6ce57;
+  for(let i=0;i<s.length;i++){const ch=s.charCodeAt(i);h1=Math.imul(h1^ch,2654435761);h2=Math.imul(h2^ch,1597334677)}
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (h2>>>0).toString(36)+(h1>>>0).toString(36)+'.'+s.length;
+}
+const parteChave=k=>{const i=k.indexOf('/');return[k.slice(0,i),k.slice(i+1)]};
+function aparelho(){let a=LS.get(KEY_APARELHO);if(!a){const ua=navigator.userAgent;a=(/android/i.test(ua)?'android':ehIphone()?'iphone':'outro')+'-'+uid();LS.set(KEY_APARELHO,a)}return a}
+/* o caderninho como registros (chave "coleção/id") */
+function registrosLocais(){
+  const m=new Map(),P=S.planilha||{};
+  const por=(c,arr)=>{if(Array.isArray(arr))for(const o of arr)if(o&&o.id!=null&&o.id!=='')m.set(c+'/'+o.id,o)};
+  por('produtos',S.produtos);por('clientes',S.clientes);por('lanc',S.lanc);
+  por('contas',P.contas);por('materiais',P.materiais);por('receitas',P.receitas);
+  const{contas,materiais,receitas,...resto}=P;
+  m.set('config/ajustes',S.ajustes||{negocio:''});m.set('config/planilha',resto);
+  return m;
+}
+/* põe no caderninho um registro que veio da conta (mantém a ordem das listas) */
+function aplicarRegistro(c,id,d,x){
+  if(c==='config'){
+    if(x||!d||typeof d!=='object')return;
+    if(id==='ajustes')S.ajustes=Object.assign({negocio:''},d);
+    else if(id==='planilha'){const{contas,materiais,receitas,...r}=d;Object.assign(S.planilha,r)}
+    return;
+  }
+  const arr=c==='produtos'?S.produtos:c==='clientes'?S.clientes:c==='lanc'?S.lanc:S.planilha&&S.planilha[c];
+  if(!Array.isArray(arr))return;
+  const i=arr.findIndex(o=>o&&String(o.id)===id);
+  if(x){if(i>=0)arr.splice(i,1)}else if(i>=0)arr[i]=d;else arr.push(d);
+}
+const contasPadraoIntactas=()=>{const nomes=new Set(CONTAS_PADRAO.map(([n])=>n));return PL().contas.every(c=>!nn(c.valor)&&nomes.has(c.nome))};
+const configPadrao=()=>{const P=PL(),d=planilhaPadrao();return ['salario','dias','horasDia','taxas','perdas','lucro'].every(k=>nn(P[k])===nn(d[k]))&&!(P.importados||[]).length};
+const caderninhoVazio=()=>!S.produtos.length&&!S.clientes.length&&!S.lanc.length&&!PL().materiais.length&&!PL().receitas.length&&contasPadraoIntactas()&&configPadrao()&&!String(S.ajustes.negocio||'').trim();
+/* não redesenha embaixo de quem está digitando: espera fechar a janela ou sair do campo */
+let redesenharDepois=false;
+function redesenharSeguro(){
+  const ae=document.activeElement,digitando=ae&&ae!==document.body&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+  if(!$('#sheet').hidden||digitando){redesenharDepois=true;return}
+  redesenharDepois=false;render();
+}
+document.addEventListener('focusout',()=>{if(redesenharDepois)setTimeout(()=>{if(redesenharDepois)redesenharSeguro()},250)});
+
+const sync={
+  meta:null,rodando:false,deNovo:false,timer:null,ultimo:0,erro:null,pendentes:0,
+  pode:()=>!!(sessao&&meuId()&&!precisaCodigo()&&(modoTeste()||configurado())),
+  /* depois de cada mudança: espera um pouquinho (junta várias mudanças seguidas num pedido só) */
+  mudou(){clearTimeout(this.timer);if(this.pode())this.timer=setTimeout(()=>this.agora(),SYNC_PAUSA)},
+  async agora(){
+    if(!this.pode())return;
+    if(this.rodando){this.deNovo=true;return}
+    this.rodando=true;
+    try{do{this.deNovo=false;await this.ciclo()}while(this.deNovo&&this.pode());this.erro=null}
+    catch(e){this.erro=e}
+    finally{this.rodando=false;atualizarSyncNaTela()}
+  },
+  async gravarMeta(){await gravarKV(KEY_SYNC,this.meta)},
+  async carregarMeta(){if(this.meta)return;const m=await lerKV(KEY_SYNC);this.meta=m&&typeof m==='object'&&m.base&&typeof m.base==='object'?m:{conta:null,rev:0,base:{}}},
+  /* entrou uma conta diferente da dona das contas deste celular (e a dona ainda existe) */
+  outraConta(){const m=this.meta,id=meuId();return !!(m&&m.conta&&id&&m.conta!==id&&(!modoTeste()||teste.conta(m.conta)))},
+  pedir(uid,desde,mudancas){return logado('rest/v1/rpc/sincronizar',{corpo:{desde,mudancas,aparelho:aparelho()},espera:60e3})},
+  /* de quem são as contas deste celular? Outra conta entrou: guarda as da anterior à parte e traz as desta */
+  async prepararDono(uid){
+    await this.carregarMeta();
+    const m=this.meta;if(m.conta===uid)return true;
+    const dono=m.conta&&(!modoTeste()||teste.conta(m.conta)); // no modo de teste, conta apagada não tem para onde voltar
+    if(!dono){this.meta={conta:uid,rev:0,base:{}};await this.gravarMeta();return true}
+    await gravarKV(KEY+'@'+m.conta,JSON.parse(JSON.stringify(S)));
+    await gravarKV(KEY_SYNC+'@'+m.conta,m);
+    const dados=await lerKV(KEY+'@'+uid),meta=await lerKV(KEY_SYNC+'@'+uid);
+    if(meuId()!==uid)return false;
+    S={produtos:[],clientes:[],lanc:[],ajustes:{negocio:''},planilha:null,ultimoBackup:null};
+    if(dados&&typeof dados==='object')S=Object.assign(S,dados);
+    completar();
+    this.meta=meta&&meta.conta===uid&&meta.base?meta:{conta:uid,rev:0,base:{}};
+    if(!await gravarLocal())throw new ErroConta('erro');
+    await this.gravarMeta();
+    ui.view='resumo';ui.cliente=null;ui.venda=novaVenda();fechar();render();
+    toast('Estas são as contas desta conta. As da outra conta continuam guardadas neste celular.');
+    return true;
+  },
+  /* primeira conversa deste celular com a conta: traz tudo e junta com o que já tem aqui (nada se perde) */
+  async primeiraVez(uid){
+    const m=this.meta,remoto=new Map();let desde=0;
+    for(let i=0;i<1000;i++){
+      const r=await this.pedir(uid,desde,[]);if(meuId()!==uid)return false;
+      for(const it of(r&&r.mudancas)||[])if(COLECOES.includes(String(it.c)))remoto.set(it.c+'/'+it.id,it);
+      desde=Number(r&&r.rev)||desde;if(!(r&&r.mais))break;
+    }
+    const vivos=[...remoto.values()].filter(it=>!it.x&&it.d!=null);
+    if(vivos.length){
+      const vazio=caderninhoVazio();
+      if(vivos.some(it=>it.c==='contas')&&contasPadraoIntactas())PL().contas=[]; // as contas do mês padrão daqui não duplicam as da conta
+      const loc=registrosLocais();
+      for(const it of remoto.values()){
+        const c=String(it.c),id=String(it.id),k=c+'/'+id,x=!!it.x||it.d==null;
+        if(x){if(!loc.has(k))m.base[k]='x';continue} // apagado em outro celular (o que existe aqui sobe de novo)
+        if(k==='config/ajustes'&&!vazio&&String(S.ajustes.negocio||'').trim())continue; // o nome daqui vale
+        if(k==='config/planilha'&&!vazio&&!configPadrao())continue;
+        const local=loc.get(k);
+        if(local&&!k.startsWith('config/')){if(impressao(local)===impressao(it.d))m.base[k]=impressao(it.d);continue}
+        aplicarRegistro(c,id,it.d,false);m.base[k]=impressao(it.d);
+      }
+    }
+    m.rev=desde;
+    if(!await gravarLocal())throw new ErroConta('erro');
+    await this.gravarMeta();
+    return true;
+  },
+  async ciclo(){
+    const uid=meuId();if(!uid)return;
+    if(!await this.prepararDono(uid)||meuId()!==uid)return;
+    let m=this.meta,mexeu=false;
+    if(!m.rev&&!Object.keys(m.base).length){if(!await this.primeiraVez(uid))return;mexeu=true}
+    for(let volta=0;volta<200;volta++){
+      m=this.meta;
+      const loc=registrosLocais(),muds=[];
+      for(const[k,o]of loc){const h=impressao(o);if(m.base[k]!==h)muds.push({k,h,o})}
+      for(const k of Object.keys(m.base))if(!loc.has(k)&&m.base[k]!=='x')muds.push({k,h:'x'});
+      this.pendentes=muds.length;
+      const lote=[];let bytes=0;
+      for(const x of muds){const t=x.h==='x'?60:canon(x.o).length+60;if(lote.length&&(lote.length>=SYNC_LOTE||bytes+t>SYNC_BYTES))break;lote.push(x);bytes+=t}
+      const r=await this.pedir(uid,m.rev,lote.map(x=>{const[c,id]=parteChave(x.k);return x.h==='x'?{c,id,x:true}:{c,id,d:x.o}}));
+      if(meuId()!==uid||this.meta!==m)return;
+      const rev=Number(r&&r.rev);
+      if(!(rev>=0)||!Array.isArray(r.mudancas))throw new ErroConta('erro');
+      if(rev<m.rev){this.meta={conta:uid,rev:0,base:{}};await this.gravarMeta();continue} // a conta foi recomeçada no servidor: sobe tudo de novo
+      for(const x of lote)m.base[x.k]=x.h;
+      const enviados=new Set(lote.map(x=>x.k)),agoraLoc=registrosLocais();
+      for(const it of r.mudancas){
+        const c=String(it.c),id=String(it.id),k=c+'/'+id;
+        if(!COLECOES.includes(c)||enviados.has(k))continue; // eco do que este celular acabou de mandar
+        const o=agoraLoc.get(k),hl=o?impressao(o):'x',b=m.base[k];
+        if(b===undefined?o!==undefined:hl!==b)continue; // mexido aqui e ainda não subiu: o daqui vale (sobe na próxima volta)
+        const x=!!it.x||it.d==null;
+        aplicarRegistro(c,id,x?null:it.d,x);m.base[k]=x?'x':impressao(it.d);mexeu=true;
+      }
+      m.rev=rev;
+      let limpou=false;
+      if(!r.mais){ // tudo recebido: venda ou pagamento de cliente apagado em outro celular sai também
+        const vivos=new Set(S.clientes.map(c=>String(c.id))),antes=S.lanc.length;
+        S.lanc=S.lanc.filter(l=>vivos.has(String(l.clienteId))||m.base['clientes/'+l.clienteId]!=='x');
+        if(S.lanc.length!==antes){limpou=mexeu=true}
+      }
+      if(mexeu&&!await gravarLocal())throw new ErroConta('erro'); // sem gravar as contas, a base não anda (senão viraria lápide ao reabrir)
+      await this.gravarMeta();
+      this.ultimo=Date.now();
+      if(!r.mais&&lote.length===muds.length&&!limpou){this.pendentes=0;break}
+    }
+    if(mexeu)redesenharSeguro();
+  }
+};
+/* o que aparece nas telas da conta sobre os dados guardados nela */
+function syncTxt(){
+  if(!sync.pode())return null;
+  const n=sync.pendentes,esp=n?` ${n===1?'1 mudança está esperando':n+' mudanças estão esperando'} para ir para a sua conta.`:'';
+  if(sync.erro&&sync.erro.codigo==='sem_internet')return['Esperando internet','warn','Sem internet agora.'+esp+' Pode continuar usando: quando a internet voltar, vai sozinho.'];
+  if(sync.erro)return['Tentando de novo','warn','Não deu para guardar na sua conta agora.'+esp+' O Caderninho tenta de novo sozinho.'];
+  if(sync.rodando&&!sync.ultimo)return['Guardando…','neutra','Guardando suas contas na sua conta…'];
+  if(sync.ultimo)return['Guardado','good',`Tudo guardado na sua conta (conferido às ${new Date(sync.ultimo).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}).`];
+  return['Guardando…','neutra','Guardando suas contas na sua conta…'];
+}
+function atualizarSyncNaTela(){const el=$('#syncInfo');if(el){const t=syncTxt();if(t){el.querySelector('.pill').className='pill '+t[1];el.querySelector('.pill').textContent=t[0];const p=$('#syncTxt');if(p)p.textContent=t[2]}}}
 
 /* ---------- planilha: custos, preços e as contas do mês ----------
    Mesmas abas e contas da "planilha de custos" (app/planilha-modelo.xlsx). Clientes, produtos, vendas, pagamentos
@@ -1330,9 +1675,11 @@ function vPlanilha(){
   <div class="abas">${ABAS.map(([k,n])=>`<button class="chip" data-act="aba" data-v="${k}" aria-pressed="${k===a}">${n}</button>`).join('')}</div>
   ${corpo}
   <h2>No Excel ou no Google Planilhas</h2>
-  <div class="card kvs"><p class="muted small" style="margin:0">Baixe a planilha completa, com tudo o que está no app. Se mexer nela, traga de volta: o que for novo entra no app. Se abrir no Google Planilhas, baixe como Excel (.xlsx) antes de trazer.</p>
+  <div class="card kvs"><p class="muted small" style="margin:0">A planilha completa, com tudo o que está no app. Se mexer nela, traga de volta: o que for novo entra no app. Se abrir no Google Planilhas, baixe como Excel (.xlsx) antes de trazer.</p>
+    <p class="muted small" style="margin:0"><b>Guardar no Google Drive:</b> toque em “Mandar a planilha” e escolha o Drive. <b>Celular novo e vazio?</b> “Trazer planilha” traz o histórico inteiro de volta: vendas, pagamentos, clientes e produtos.</p>
+    <button class="btn ghost" data-act="mandarPlanilha">${IC.trazer}Mandar a planilha (Drive, WhatsApp, e-mail)</button>
     <button class="btn ghost" data-act="baixarPlanilha">${IC.baixar}Baixar planilha</button>
-    <label class="btn ghost filebtn">${IC.trazer}Trazer planilha editada<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" id="planArq"></label></div>`;
+    <label class="btn ghost filebtn">${IC.trazer}Trazer planilha (editada ou de outro celular)<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" id="planArq"></label></div>`;
 }
 const mesBar=()=>`<div class="mesbar"><button class="x" data-act="mes" data-v="-1" aria-label="Mês anterior">‹</button><b>${nomeMes(ui.mes)}</b><button class="x" data-act="mes" data-v="1" aria-label="Próximo mês">›</button></div>`;
 const tabela=(cab,linhas,rodape='')=>`<div class="tabela-wrap"><table class="tabela"><thead><tr>${cab.map(([t,n])=>`<th class="${n?'num':''}">${t}</th>`).join('')}</tr></thead><tbody>${linhas.join('')}</tbody>${rodape}</table></div>`;
@@ -1575,8 +1922,9 @@ function dataDe(x){
 const PLANILHA_ABAS=['Início','Resumo','Vendas','Recebi','Acertos','Clientes','Produtos','Receitas','Materiais','Meu Mês'];
 function baixarBlob(blob,nome){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000)}
 
-async function baixarPlanilha(){
-  if(typeof DecompressionStream==='undefined'){toast('Este navegador é antigo demais para montar a planilha. Atualize o navegador do celular.',true);return}
+/* monta a planilha .xlsx com tudo o que está no app (para baixar ou mandar para o Drive/WhatsApp) */
+async function montarPlanilha(){
+  if(typeof DecompressionStream==='undefined'){toast('Este navegador é antigo demais para montar a planilha. Atualize o navegador do celular.',true);return null}
   toast('Montando a planilha…');
   const zip=await lerZip(await (await fetch('planilha-modelo.xlsx')).arrayBuffer()),ab=abasDoZip(zip),sst=lerSST(zip),td=new TextDecoder(),F={};
   for(const n of PLANILHA_ABAS)F[n]=folha(td.decode(zip.get(ab[n])),sst);
@@ -1608,8 +1956,24 @@ async function baixarPlanilha(){
   for(const n of PLANILHA_ABAS){F[n].semCache();zip.set(ab[n],te.encode(F[n].xml()))}
   zip.set('xl/workbook.xml',te.encode(new TextDecoder().decode(zip.get('xl/workbook.xml')).replace(/<calcPr\b/,'<calcPr fullCalcOnLoad="1"')));
   zip.delete('xl/calcChain.xml');
-  baixarBlob(await fazerZip([...zip]),`caderninho-planilha-${hoje()}.xlsx`);
-  toast(cheio?'Planilha baixada, mas tinha mais linhas do que ela comporta: algumas contas podem ficar de fora.':'Planilha baixada. Fica na pasta “Downloads”.',cheio);
+  return{blob:await fazerZip([...zip]),nome:`caderninho-planilha-${hoje()}.xlsx`,cheio};
+}
+const AVISO_CHEIO='Tinha mais linhas do que a planilha comporta: algumas contas podem ficar de fora.';
+async function baixarPlanilha(){
+  const r=await montarPlanilha();if(!r)return;
+  baixarBlob(r.blob,r.nome);
+  toast(r.cheio?'Planilha baixada. '+AVISO_CHEIO:'Planilha baixada. Fica na pasta “Downloads”.',r.cheio);
+}
+/* manda a planilha para outro app do celular (Google Drive, WhatsApp, e-mail…). Sem esse recurso, baixa. */
+async function mandarPlanilha(){
+  const r=await montarPlanilha();if(!r)return;
+  let arq=null;try{arq=new File([r.blob],r.nome,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}catch(e){}
+  if(arq&&navigator.canShare&&navigator.canShare({files:[arq]})){
+    try{await navigator.share({files:[arq],title:'Planilha do Caderninho'});if(r.cheio)toast(AVISO_CHEIO,true);return}
+    catch(e){if(e&&e.name==='AbortError')return}
+  }
+  baixarBlob(r.blob,r.nome);
+  toast('Este celular não deixou mandar direto. A planilha foi baixada: abra o Google Drive e envie o arquivo que está na pasta “Downloads”.',true);
 }
 
 /* ler a planilha editada e mostrar o que vai mudar antes de mexer em qualquer coisa */
@@ -1623,7 +1987,10 @@ async function trazerPlanilha(arq){
   const ler=(f,cols,de,ate)=>{const out=[];if(!f)return out;for(let r=de;r<=ate;r++){const o={r};for(const c of cols)o[c]=f.ler(c+r);if(cols.some(c=>txt(o[c])!==''))out.push(o)}return out};
   const mm=F['Meu Mês'],c0=mm.achar('Conta')+1,c1=mm.achar('Total das contas')-1,linhaMM=t=>{const r=mm.achar(t,c1);return r?num(mm.ler('C'+r)):0};
   const imp=new Set(PL().importados||[]);
-  const novas=(aba,ls,id,vals)=>ls.filter(o=>!txt(o[id])).map(o=>Object.assign(o,{sig:assinatura(aba,o.r,vals.map(c=>txt(o[c])))})).filter(o=>!imp.has(o.sig));
+  /* celular sem nenhuma venda nem pagamento (perdeu ou trocou de celular): traz também as linhas que vieram do app,
+     com o mesmo código, e o histórico inteiro volta. Com o caderninho em uso, só entra o que é novo na planilha. */
+  const recuperar=!S.lanc.length,codigo=x=>{const t=txt(x);return /^[A-Za-z0-9_-]{1,80}(:\d+)?$/.test(t)?t:''};
+  const novas=(aba,ls,id,vals)=>ls.filter(o=>recuperar?true:!txt(o[id])).map(o=>Object.assign(o,{sig:assinatura(aba,o.r,vals.map(c=>txt(o[c]))),idApp:recuperar?codigo(o[id]):''})).filter(o=>o.idApp||!imp.has(o.sig));
   const pl={
     negocio:F['Início']?txt(F['Início'].ler('D4')):'',
     mes:{contas:ler(mm,['B','C','D'],c0,c1).filter(o=>txt(o.B)||num(o.C)).map(o=>({nome:txt(o.B)||'Conta',valor:num(o.C),obs:txt(o.D)})),
@@ -1632,15 +1999,15 @@ async function trazerPlanilha(arq){
     produtos:ler(F.Produtos,['B','C','D','E','L'],5,104).filter(o=>txt(o.B)).map(o=>({nome:txt(o.B),rende:num(o.C),horas:num(o.D),paga:num(o.E),preco:num(o.L)})),
     receitas:ler(F.Receitas,['B','C','D','G'],5,504).filter(o=>txt(o.B)&&txt(o.C)).map(o=>({produto:txt(o.B),material:txt(o.C),qtd:num(o.D),obs:txt(o.G)})),
     clientes:ler(F.Clientes,['B','C','D'],5,304).filter(o=>txt(o.B)).map(o=>({nome:txt(o.B),tel:txt(o.C),obs:txt(o.D)})),
-    vendas:novas('V',ler(F.Vendas,['B','C','D','E','F','J','K'],5,3004).filter(o=>txt(o.C)&&(txt(o.D)||txt(o.F))),'K',['B','C','D','E','F','J']),
+    vendas:novas('V',ler(F.Vendas,['B','C','D','E','F','H','J','K'],5,3004).filter(o=>txt(o.C)&&(txt(o.D)||txt(o.F))),'K',['B','C','D','E','F','J']),
     recebi:novas('R',ler(F.Recebi,['B','C','D','E','F','G'],5,3004).filter(o=>txt(o.C)&&num(o.D)),'G',['B','C','D','E','F']),
     acertos:novas('A',ler(F.Acertos,['B','C','D','E','F','G'],5,504).filter(o=>txt(o.C)&&num(o.D)),'G',['B','C','D','E','F'])
   };
   const nomes=new Set([...rotulosClientes().values(),...S.clientes.map(c=>c.nome)].map(norm));
   const cliNovos=new Set([...pl.clientes.map(c=>c.nome),...pl.vendas.map(o=>txt(o.C)),...pl.recebi.map(o=>txt(o.C)),...pl.acertos.map(o=>txt(o.C))].filter(n=>!nomes.has(norm(n))).map(norm)).size;
   const prodNovos=pl.produtos.filter(p=>!S.produtos.some(x=>norm(x.nome)===norm(p.nome))).length;
-  const conta=(n,um,varios)=>`<li>${n} ${n===1?um:varios}</li>`;
-  perguntar('Trazer a planilha para o app?',`Encontrei na planilha:<ul style="margin:8px 0;padding-left:20px">${conta(pl.vendas.length,'venda nova','vendas novas')}${conta(pl.recebi.length,'pagamento novo','pagamentos novos')}${conta(pl.acertos.length,'acerto novo','acertos novos')}${conta(cliNovos,'cliente novo','clientes novos')}${conta(prodNovos,'produto novo','produtos novos')}<li>Meu Mês, materiais, receitas, custos e preços</li></ul>O que já veio do app não muda. Para corrigir ou apagar uma venda, um pagamento ou um acerto, use o app.`,'Sim, trazer',()=>{aplicarImportacao(pl);fechar();render();toast('Planilha trazida para o app')},'');
+  const conta=(n,um,varios)=>`<li>${n} ${n===1?um:varios}</li>`,nVendas=new Set(pl.vendas.map(o=>o.idApp?o.idApp.split(':')[0]:'r'+o.r)).size;
+  perguntar(recuperar?'Trazer o histórico da planilha?':'Trazer a planilha para o app?',`${recuperar?'<p style="margin:0 0 8px">Este caderninho está vazio, então vou trazer <b>tudo</b> o que está na planilha, inclusive o que tinha vindo do app.</p>':''}Encontrei na planilha:<ul style="margin:8px 0;padding-left:20px">${conta(nVendas,'venda nova','vendas novas')}${conta(pl.recebi.length,'pagamento novo','pagamentos novos')}${conta(pl.acertos.length,'acerto novo','acertos novos')}${conta(cliNovos,'cliente novo','clientes novos')}${conta(prodNovos,'produto novo','produtos novos')}<li>Meu Mês, materiais, receitas, custos e preços</li></ul>${recuperar?'Depois, para corrigir ou apagar uma venda, um pagamento ou um acerto, use o app.':'O que já veio do app não muda. Para corrigir ou apagar uma venda, um pagamento ou um acerto, use o app.'}`,'Sim, trazer',()=>{aplicarImportacao(pl);fechar();render();toast('Planilha trazida para o app')},'');
 }
 function aplicarImportacao(pl){
   const P=PL(),rot=rotulosClientes(),cliPor=new Map();
@@ -1659,13 +2026,23 @@ function aplicarImportacao(pl){
   aplicarPlanilha();
   const idCli=nome=>{let id=cliPor.get(norm(nome));if(!id){const x={id:uid(),nome,tel:'',obs:''};S.clientes.push(x);id=x.id;cliPor.set(norm(nome),id)}return id};
   const txt=x=>String(x??'').trim(),num=x=>typeof x==='number'?x:lerNum(x);let t=Date.now();const criado=()=>new Date(t++).toISOString();
-  for(const o of pl.vendas){const p=prodPor.get(norm(o.D)),qtd=num(o.E)>0?num(o.E):1,preco=num(o.F)>0?num(o.F):p?nn(p.preco):0,data=dataDe(o.B),cr=criado();
-    const item=p?{produtoId:p.id,nome:p.nome,qtd,preco,custo:nn(p.custo)}:{produtoId:null,nome:(qtd>1?qtd+' ':'')+(txt(o.D)||'Valor avulso'),qtd:1,preco:r2(preco*qtd),custo:0};
-    const l={id:uid(),tipo:'venda',clienteId:idCli(txt(o.C)),itens:[item],valor:r2(item.preco*item.qtd),custo:r4(item.custo*item.qtd),data,criado:cr};S.lanc.push(l);
-    if(/^s/i.test(txt(o.J)))S.lanc.push({id:uid(),tipo:'pag',clienteId:l.clienteId,valor:l.valor,forma:'Na hora',data,criado:cr+'1'})}
-  for(const o of pl.recebi)S.lanc.push({id:uid(),tipo:'pag',clienteId:idCli(txt(o.C)),valor:r2(num(o.D)),forma:txt(o.E)||'Dinheiro',obs:txt(o.F),data:dataDe(o.B),criado:criado()});
-  for(const o of pl.acertos)S.lanc.push({id:uid(),tipo:'ajuste',clienteId:idCli(txt(o.C)),valor:r2(num(o.D)),motivo:/corre/i.test(txt(o.E))?'erro':'presente',obs:txt(o.F),data:dataDe(o.B),criado:criado()});
-  P.importados=[...(P.importados||[]),...pl.vendas,...pl.recebi,...pl.acertos].map(o=>o.sig||o);
+  /* linhas com o código do app (só ao recuperar o histórico) voltam com o mesmo código e o custo daquele dia (coluna H);
+     a mesma venda com vários produtos vira uma venda só. Linhas novas, escritas na planilha, são uma venda cada. */
+  const grupos=[],porCod=new Map();
+  for(const o of pl.vendas){const cod=o.idApp?o.idApp.split(':')[0]:'';if(cod&&porCod.has(cod)){porCod.get(cod).linhas.push(o);continue}const g={cod,linhas:[o]};grupos.push(g);if(cod)porCod.set(cod,g)}
+  const jaTem=new Set(S.lanc.map(l=>String(l.id)));
+  for(const g of grupos){
+    const o0=g.linhas[0],data=dataDe(o0.B),cr=criado(),clienteId=idCli(txt(o0.C));
+    const itens=g.linhas.map(o=>{const p=prodPor.get(norm(o.D)),qtd=num(o.E)>0?num(o.E):1,preco=num(o.F)>0?num(o.F):p?nn(p.preco):0;
+      if(g.cod){const ct=num(o.H),cu=ct>0?r4(ct/qtd):p?nn(p.custo):0;return p?{produtoId:p.id,nome:p.nome,qtd,preco,custo:cu}:{produtoId:null,nome:txt(o.D)||'Valor avulso',qtd,preco,custo:cu}}
+      return p?{produtoId:p.id,nome:p.nome,qtd,preco,custo:nn(p.custo)}:{produtoId:null,nome:(qtd>1?qtd+' ':'')+(txt(o.D)||'Valor avulso'),qtd:1,preco:r2(preco*qtd),custo:0}});
+    const id=g.cod&&!jaTem.has(g.cod)?g.cod:uid();jaTem.add(id);
+    const l={id,tipo:'venda',clienteId,itens,valor:r2(itens.reduce((t,i)=>t+i.preco*i.qtd,0)),custo:r4(itens.reduce((t,i)=>t+(i.custo||0)*i.qtd,0)),data,criado:cr};S.lanc.push(l);
+    if(g.linhas.some(o=>/^s/i.test(txt(o.J))))S.lanc.push({id:uid(),tipo:'pag',clienteId,valor:l.valor,forma:'Na hora',data,criado:cr+'1'})}
+  const idDe=o=>{if(o.idApp&&!jaTem.has(o.idApp)){jaTem.add(o.idApp);return o.idApp}return uid()};
+  for(const o of pl.recebi)S.lanc.push({id:idDe(o),tipo:'pag',clienteId:idCli(txt(o.C)),valor:r2(num(o.D)),forma:txt(o.E)||'Dinheiro',obs:txt(o.F),data:dataDe(o.B),criado:criado()});
+  for(const o of pl.acertos)S.lanc.push({id:idDe(o),tipo:'ajuste',clienteId:idCli(txt(o.C)),valor:r2(num(o.D)),motivo:/corre/i.test(txt(o.E))?'erro':'presente',obs:txt(o.F),data:dataDe(o.B),criado:criado()});
+  P.importados=[...(P.importados||[]),...[...pl.vendas,...pl.recebi,...pl.acertos].filter(o=>!o.idApp).map(o=>o.sig)]; // linhas com código do app não precisam de assinatura
   salvar();
 }
 
@@ -1735,7 +2112,7 @@ document.addEventListener('click',async e=>{
         l.valor=v;l.forma=formaPag;l.data=$('#epData').value||l.data;
       }
       salvar();fechar();render();toast(l.tipo==='venda'?'Venda corrigida':'Pagamento corrigido');break;}
-    case 'apagarLanc': { const l=S.lanc.find(x=>x.id===edit.id),venda=l.tipo==='venda',p=venda&&pagNaHora(l);
+    case 'apagarLanc': { const l=S.lanc.find(x=>x.id===edit.id);if(!l){fechar();render();return} const venda=l.tipo==='venda',p=venda&&pagNaHora(l);
       perguntar(venda?'Apagar esta venda?':'Apagar este pagamento?',`${venda?'Venda':'Pagamento'} de ${brl(l.valor)} do dia ${fmtData(l.data)}. Use só se anotou errado.${p?' O pagamento na hora dessa venda também sai.':''}`,'Sim, apagar',()=>{S.lanc=S.lanc.filter(x=>x!==l&&x!==p);salvar();fechar();render();toast(venda?'Venda apagada':'Pagamento apagado')}); break;}
     case 'ajustar': formAjuste(); break;
     case 'motivo': motivoAj=b.dataset.v; document.querySelectorAll('#motivos .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v===motivoAj)); break;
@@ -1787,6 +2164,7 @@ document.addEventListener('click',async e=>{
       if(t<0||pe<0||lu<0||t+lu>=1){toast('As porcentagens ficaram estranhas. Ex.: taxas 3, perdas 5, lucro 15',true);return}
       Object.assign(PL(),{taxas:t,perdas:pe,lucro:lu}); aplicarPlanilha(); salvar(); fechar(); render(); toast('Porcentagens salvas'); break;}
     case 'baixarPlanilha': try{await baixarPlanilha()}catch(err){toast('Não consegui montar a planilha aqui. Tente de novo.',true)} break;
+    case 'mandarPlanilha': try{await mandarPlanilha()}catch(err){toast('Não consegui montar a planilha aqui. Tente de novo.',true)} break;
     case 'novoProduto': formProd(null); break;
     case 'editProd': formProd(prod(id)); break;
     case 'toggleAtivo': b.setAttribute('aria-checked',b.getAttribute('aria-checked')!=='true'); break;
@@ -1847,7 +2225,8 @@ document.addEventListener('submit',e=>e.preventDefault()); // "Ok/Ir" do teclado
 (async()=>{
   try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
   lerSessao();lerAcesso();
-  await carregar();completar();
+  if(navigator.onLine===false)erroAcesso=new ErroConta('sem_internet'); // modo avião: já abre sabendo, sem piscar o portão
+  await carregar();completar();await sync.carregarMeta();
   const pagou=voltouDoPagamento();
   render();
   await voltouDoEmail();
@@ -1855,16 +2234,22 @@ document.addEventListener('submit',e=>e.preventDefault()); // "Ok/Ir" do teclado
     atualizarUsuario().catch(()=>{});
     await verificarAcesso(pagou);
     if(pagou&&!erroAcesso){
-      if(ativaAgora()){LS.del(KEY_PAGANDO);toast('Assinatura confirmada! Obrigado.')}
+      if(ativaAgora()||anualAgora()){LS.del(KEY_PAGANDO);pagamentoVolta='';toast(anualAgora()&&!ativaAgora()?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.')}
       else toast('Ainda não chegou a confirmação do Mercado Pago. Toque em “Já paguei, conferir” daqui a pouco.',true);
     }
+    sync.agora();
   }else if(!sessao)carregarPreco();
   window.addEventListener('hashchange',()=>{voltouDoEmail()});
-  /* voltou para o app depois de um tempo: confere de novo (no máximo a cada 10 minutos) */
+  /* voltou para o app depois de um tempo: confere de novo (no máximo a cada 10 minutos) e traz o que mudou nos outros celulares */
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden||!sessao||precisaCodigo())return;
-    const a=meuAcesso();if(!a||Date.now()-a.em>10*60e3)verificarAcesso(!!LS.get(KEY_PAGANDO));
+    const a=meuAcesso();if(!a||Date.now()-a.em>10*60e3||semRede())verificarAcesso(!!LS.get(KEY_PAGANDO));
+    sync.agora();
   });
+  /* a internet voltou: confere a conta e manda o que ficou esperando */
+  window.addEventListener('online',()=>{if(!sessao||precisaCodigo())return;if(semRede()||!meuAcesso())verificarAcesso(!!LS.get(KEY_PAGANDO));sync.agora()});
+  /* com o app aberto, olha de tempos em tempos se o outro celular anotou algo */
+  setInterval(()=>{if(!document.hidden&&navigator.onLine!==false)sync.agora()},SYNC_INTERVALO);
 })();
 /* funciona sem internet depois da primeira vez */
 if('serviceWorker' in navigator&&location.protocol!=='file:'){navigator.serviceWorker.register('./sw.js').catch(()=>{})}

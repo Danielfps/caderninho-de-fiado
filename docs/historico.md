@@ -102,10 +102,25 @@ Ela agora faz parte do app (`app/planilha-modelo.xlsx`):
 - Feito em equipe: Claude (app e orquestração), Esquadro/Codex (servidor, teste de ponta a ponta e revisão),
   Pluma/Gemini (guia da conta).
 
+## Conta que não cai, vários celulares e planos novos (02/11/2026)
+
+- Pedido do Daniel (deixou o PC trabalhando à noite): a conta não pode cair sem internet; a mesma conta em dois ou
+  mais celulares; perdeu o celular, o histórico volta; preços novos.
+- **Conta que não cai:** só sai da conta com resposta definitiva do servidor; sem internet, servidor fora, relógio
+  errado ou duas janelas abertas, continua dentro.
+- **Vários celulares:** os dados sobem para a conta e descem nos outros celulares (registro por registro, funciona
+  sem internet e manda quando voltar). A ideia do Daniel era usar a planilha do Google como ponte; ficou a conta como
+  ponte (mais seguro) e a planilha como cópia: "Mandar a planilha" para o Drive e, num celular vazio, "Trazer
+  planilha" traz o histórico inteiro. Detalhes em `docs/sincronizar.md`.
+- **Planos:** 3 dias grátis; mensal R$ 14,90 no 1º mês e depois R$ 19,90 (cartão); anual R$ 149,90 (Pix ou cartão,
+  pagamento único). Detalhes em `docs/assinatura.md`.
+- Feito em equipe: Claude (app, orquestração, teste de ponta a ponta), Codex (servidor, SQL testado no PGlite,
+  Supabase de mentira para os testes), subagentes (desenho do Mercado Pago e pesquisa de preços).
+
 ## Falta fazer
 
 - [x] Deixar o repositório público e ligar o GitHub Pages (29/10/2026).
 - [ ] Abrir o endereço no celular e instalar.
 - [ ] Se já tinha contas na versão de teste, passar para o app novo pela cópia de segurança.
-- [ ] Decidir o preço da assinatura (hoje R$ 9,90 provisório).
+- [x] Decidir o preço da assinatura (02/11/2026: 14,90 no 1º mês, 19,90/mês, 149,90/ano).
 - [ ] Ligar Supabase e Mercado Pago (`docs/conta.md` e `docs/assinatura.md`) e testar com usuários de teste do Mercado Pago.

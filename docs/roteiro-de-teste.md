@@ -4,7 +4,7 @@ Este teste roda no MODO DE TESTE através do link <https://claude.ai/artifact/Sd
 
 1. **Abrir o link**
    - **Toque em:** Abra o link <https://claude.ai/artifact/SdJVLsgi1uMTTwbmFGfpnc> no navegador do celular ou do computador.
-   - **O que deve aparecer:** A tela "Boas-vindas ao Caderninho" com "3 dias grátis" e "Depois, R$ 9,90 por mês".
+   - **O que deve aparecer:** A tela "Boas-vindas ao Caderninho" com "3 dias grátis" e "Depois, R$ 14,90 no 1º mês e R$ 19,90 por mês, ou R$ 149,90 por ano".
 
 2. **Criar a conta**
    - **Toque em:** "Criar minha conta", preencha nome, e-mail (pode ser inventado) e senha de 8 letras ou números, depois toque em "Criar conta".
@@ -20,10 +20,10 @@ Este teste roda no MODO DE TESTE através do link <https://claude.ai/artifact/Sd
 
 5. **Terminar o teste grátis**
    - **Toque em:** Botão 🧪 no alto -> "Pular para o fim do teste grátis".
-   - **O que deve aparecer:** Aparece "Seu teste grátis acabou", com o preço e o botão "Assinar agora". O rodapé some.
+   - **O que deve aparecer:** Aparece "Seu teste grátis acabou", com os dois planos (Mensal: R$ 14,90 no 1º mês, depois R$ 19,90; Anual: R$ 149,90, "Economize 37%") e o botão "Assinar agora". O rodapé some.
 
 6. **Assinar e pagar**
-   - **Toque em:** "Assinar agora" -> confere o e-mail -> "Ir para o pagamento" -> na tela "Pagamento de teste", toque em "Pagamento aprovado".
+   - **Toque em:** "Assinar agora" -> confere o e-mail -> "Ir para o pagamento de R$ 14,90" -> na tela "Pagamento de teste", toque em "Pagamento aprovado". (Para testar o anual: toque no cartão "Anual" antes de "Assinar agora".)
    - **O que deve aparecer:** O caderninho volta, com a venda ou o cliente do passo 3.
 
 7. **Passar 1 mês**
@@ -41,6 +41,18 @@ Este teste roda no MODO DE TESTE através do link <https://claude.ai/artifact/Sd
 10. **Começar do zero**
     - **Toque em:** Botão 🧪 no alto -> "Apagar as contas de teste" (para começar do zero quando quiser).
     - **O que deve aparecer:** As contas de teste são apagadas (não apaga vendas, clientes e produtos).
+
+11. **Guardado na conta** (02/11/2026)
+    - **Toque em:** Bonequinho no alto -> "Minha conta".
+    - **O que deve aparecer:** O quadro "Guardado na sua conta" com "Guardado" e a explicação de como usar em outro celular. No modo de teste, a conta fica só neste aparelho; o teste com dois celulares de verdade só funciona depois de ligar o Supabase (`node testes/sincronizar.e2e.mjs` testa isso no computador).
+
+12. **Modo avião**
+    - **Toque em:** Ligue o modo avião do celular, anote uma venda e abra "Minha conta".
+    - **O que deve aparecer:** Continua na conta, a venda fica salva e o quadro mostra "Esperando internet". Desligue o modo avião: volta para "Guardado".
+
+13. **Planilha num celular vazio**
+    - **Toque em:** Resumo -> "Consultar planilha" -> "Mandar a planilha" (escolha o Google Drive) ou "Baixar planilha". Num caderninho vazio (outra conta de teste), "Trazer planilha" com esse arquivo.
+    - **O que deve aparecer:** "Trazer o histórico da planilha?" e, depois de "Sim, trazer", todas as vendas, pagamentos, clientes e produtos de volta.
 
 ## Se algo estranho acontecer
 

@@ -8,6 +8,7 @@ import {
   responderJson,
 } from "../_shared/servidor.ts";
 import { criarManifestoWebhook, isUuid, mapearStatusMercadoPago, validadeNaoEncurtada } from "../_shared/assinatura.mjs";
+import { processarPagamentoAnual, consumirPromocao } from "../_shared/pagamentos.ts";
 
 function lerAssinaturaHeader(valor: string | null) {
   const partes = new Map<string, string>();
@@ -53,16 +54,22 @@ Deno.serve(async (req) => {
   if (!id || !(await validarAssinatura(req, id, secret))) {
     return responderJson(req, config, 401, { erro: "assinatura_invalida" });
   }
-  if (topic !== "subscription_preapproval" && topic !== "subscription_authorized_payment") {
+  if (topic !== "subscription_preapproval" && topic !== "subscription_authorized_payment" && topic !== "payment") {
     return responderJson(req, config, 200, { ok: true });
   }
 
   try {
+    if (topic === "payment") {
+      const pagamento = await chamarMercadoPago(config, `/v1/payments/${encodeURIComponent(id)}`);
+      await processarPagamentoAnual(config, pagamento);
+      return responderJson(req, config, 200, { ok: true });
+    }
     let preapprovalId = id;
+    let pagamentoAutorizado: any = null;
     if (topic === "subscription_authorized_payment") {
-      const pagamento = await chamarMercadoPago(config, `/authorized_payments/${encodeURIComponent(id)}`);
-      if (!pagamento?.preapproval_id) return responderJson(req, config, 200, { ok: true });
-      preapprovalId = String(pagamento.preapproval_id);
+      pagamentoAutorizado = await chamarMercadoPago(config, `/authorized_payments/${encodeURIComponent(id)}`);
+      if (!pagamentoAutorizado?.preapproval_id) return responderJson(req, config, 200, { ok: true });
+      preapprovalId = String(pagamentoAutorizado.preapproval_id);
     }
     let preapproval = await chamarMercadoPago(config, `/preapproval/${encodeURIComponent(preapprovalId)}`);
     if (!isUuid(preapproval?.external_reference)) return responderJson(req, config, 200, { ok: true });
@@ -96,6 +103,11 @@ Deno.serve(async (req) => {
       mp_preapproval_id: String(preapproval.id),
       atualizado_em: new Date().toISOString(),
     });
+    if (topic === "subscription_authorized_payment") {
+      await consumirPromocao(config, preapproval, pagamentoAutorizado, (dados) =>
+        gravarAssinatura(config, userId, { ...dados, status: statusFinal, valido_ate: validoAte, mp_preapproval_id: String(preapproval.id) }),
+        !!atual?.promo_consumida_em);
+    }
     return responderJson(req, config, 200, { ok: true });
   } catch (error) {
     console.error("Falha ao processar webhook do Mercado Pago", error);

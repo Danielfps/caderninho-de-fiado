@@ -7,6 +7,10 @@ import {
   separarDuplicadas,
   mapearStatusMercadoPago,
   validadeNaoEncurtada,
+  precoParaCriar,
+  pagamentoAnualValido,
+  cobrancaAprovada,
+  novaValidadeAnual,
 } from "../supabase/functions/_shared/assinatura.mjs";
 
 test("mapeia estados do Mercado Pago", () => {
@@ -66,4 +70,26 @@ test("duas autorizadas: fica a mais antiga e a outra é duplicada", () => {
   assert.deepEqual(duplicadas.map((p) => p.id), ["nova"]);
   assert.equal(escolherPreapproval(lista).id, "velha");
   assert.deepEqual(separarDuplicadas([{ id: "x", status: "pending" }]), { manter: null, duplicadas: [] });
+});
+
+test('preço mensal aplica a promoção uma vez e anual usa seu próprio preço',()=>{
+  assert.deepEqual(precoParaCriar({}),{valor:14.9,promocional:true});
+  assert.deepEqual(precoParaCriar({promoConsumida:true}),{valor:19.9,promocional:false});
+  assert.deepEqual(precoParaCriar({plano:'anual'}),{valor:149.9,promocional:false});
+});
+
+test('pagamento anual só aceita referência da conta, aprovado em BRL e valor mínimo',()=>{
+  const base={external_reference:'anual:11111111-1111-4111-8111-111111111111',currency_id:'BRL',transaction_amount:149.9,status:'approved'};
+  assert.deepEqual(pagamentoAnualValido(base),{valido:true,userId:'11111111-1111-4111-8111-111111111111',aprovado:true});
+  assert.equal(pagamentoAnualValido({...base,currency_id:'USD'}).valido,false);
+  assert.equal(pagamentoAnualValido({...base,transaction_amount:149.88}).valido,false);
+  assert.deepEqual(pagamentoAnualValido({...base,status:'refunded'}),{valido:true,userId:'11111111-1111-4111-8111-111111111111',aprovado:false});
+});
+
+test('promoção só termina depois de prova de cobrança aprovada e validade anual soma 365 dias',()=>{
+  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}}}),false);
+  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summary:{charged_quantity:1}}}),true);
+  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}},pagamento:{status:'processed',payment:{status:'approved'}}}),true);
+  assert.equal(novaValidadeAnual({agora:'2026-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');
+  assert.equal(calcularLiberadoAte({testeAte:'2026-01-02T00:00:00Z',anualAte:'2027-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');
 });

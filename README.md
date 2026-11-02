@@ -29,7 +29,12 @@ quanto vendeu no mês, quanto já recebeu e o lucro.
 - **Cópia de segurança** — salva em arquivo ou copia o texto para guardar numa conversa do WhatsApp.
 - **Funciona sem internet** depois da primeira vez que abre.
 
-As contas ficam guardadas **só no celular** de quem usa. Nada vai para a internet.
+- **Conta e vários celulares** — com a conta, as contas ficam no celular e na conta: entre com o mesmo e-mail e senha
+  em outro celular e tudo aparece lá; perdeu o celular, entra no novo e tudo volta. Funciona sem internet (o que for
+  anotado sobe quando a internet voltar). Veja `docs/sincronizar.md`.
+- **Planos** — 3 dias grátis; depois mensal (R$ 14,90 no 1º mês, depois R$ 19,90) ou anual (R$ 149,90, Pix ou cartão).
+
+Sem conta ligada (modo de teste), as contas ficam só no celular de quem usa.
 
 ## Ligar a publicação (uma vez só)
 

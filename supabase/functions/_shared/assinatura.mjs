@@ -9,14 +9,45 @@ export function mapearStatusMercadoPago(status) {
   }
 }
 
-export function calcularLiberadoAte({ testeAte, assinatura, validoAte }) {
+export function calcularLiberadoAte({ testeAte, assinatura, validoAte, anualAte }) {
   const datas = [testeAte];
   if (validoAte && assinatura === "ativa") {
     datas.push(new Date(new Date(validoAte).getTime() + 3 * 86400000));
   } else if (validoAte && (assinatura === "pausada" || assinatura === "cancelada" || assinatura === "pendente")) {
     datas.push(new Date(validoAte));
   }
+  if (anualAte) datas.push(anualAte);
   return new Date(Math.max(...datas.map((d) => new Date(d).getTime()))).toISOString();
+}
+
+export function precoParaCriar({ plano = 'mensal', precoMensal = 19.9, precoPromo = 14.9, precoAnual = 149.9, promoConsumida = false }) {
+  if (plano === 'anual') return { valor: precoAnual, promocional: false };
+  const promocional = !promoConsumida && Number.isFinite(Number(precoPromo)) && Number(precoPromo) > 0;
+  return { valor: promocional ? Number(precoPromo) : precoMensal, promocional };
+}
+
+export function pagamentoAnualValido(pagamento, precoAnual = 149.9) {
+  const referencia = String(pagamento?.external_reference ?? '');
+  const id = referencia.startsWith('anual:') ? referencia.slice(6) : '';
+  if (!isUuid(id)) return { valido: false, userId: null, aprovado: false };
+  const status = String(pagamento?.status ?? '').toLowerCase();
+  if (['refunded', 'charged_back', 'cancelled', 'canceled'].includes(status)) {
+    return { valido: true, userId: id, aprovado: false };
+  }
+  const aprovado = status === 'approved' && String(pagamento?.currency_id ?? '').toUpperCase() === 'BRL'
+    && Number(pagamento?.transaction_amount) >= Number(precoAnual) - 0.01;
+  return { valido: aprovado, userId: id, aprovado };
+}
+
+export function cobrancaAprovada({ preapproval, pagamento, precoMensal = 19.9 }) {
+  return Number(preapproval?.auto_recurring?.transaction_amount) < Number(precoMensal)
+    && (Number(preapproval?.summary?.charged_quantity) >= 1
+      || (pagamento?.status === 'processed' && pagamento?.payment?.status === 'approved'));
+}
+
+export function novaValidadeAnual({ agora = new Date(), validadeAtual = null }) {
+  const base = Math.max(new Date(agora).getTime(), validadeAtual ? new Date(validadeAtual).getTime() : 0);
+  return new Date(base + 365 * 86400000).toISOString();
 }
 
 export function criarManifestoWebhook({ id, requestId, ts }) {
