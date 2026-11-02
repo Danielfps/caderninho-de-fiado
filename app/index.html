@@ -372,7 +372,7 @@ const cli=id=>S.clientes.find(c=>c.id===id);
 let pedidoInstalar=null;
 const instalado=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 const ehIphone=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();pedidoInstalar=e;if(ui.view==='resumo'&&$('#sheet').hidden)render()});
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();pedidoInstalar=e;if((ui.view==='resumo'||$('#portao'))&&$('#sheet').hidden)render()});
 window.addEventListener('appinstalled',()=>{pedidoInstalar=null;render();toast('Pronto! O Caderninho está na sua tela inicial')});
 const bannerInstalar=()=>pedidoInstalar&&!instalado()?`<div class="banner"><span style="flex:1">Coloque o Caderninho na tela inicial, igual a um aplicativo.</span><button data-act="instalar">Instalar</button></div>`:'';
 function blocoInstalar(){
@@ -381,6 +381,15 @@ function blocoInstalar(){
     :ehIphone()?`<p class="muted" style="margin:0">No Safari, toque no botão de compartilhar (o quadradinho com a setinha para cima) e depois em <b>“Adicionar à Tela de Início”</b>.</p>`
     :`<p class="muted" style="margin:0">No Chrome do celular, toque nos três pontinhos (⋮) no canto de cima e depois em <b>“Instalar app”</b> ou <b>“Adicionar à tela inicial”</b>.</p>`;
   return `<h2>Deixar com cara de app</h2><p class="muted" style="margin:0">Vai aparecer um ícone na tela do celular, igual ao de um aplicativo. Funciona até sem internet.</p>${como}`;
+}
+/* na tela de entrada: primeiro instalar, depois criar a conta (no iPhone o app instalado não enxerga a conta feita no Safari) */
+function passoInstalar(){
+  if(instalado())return '';
+  const como=pedidoInstalar?`<button class="btn" data-act="instalar">Instalar o Caderninho</button>`
+    :ehIphone()?`<p class="muted small" style="margin:0">No Safari, toque no botão de compartilhar (o quadradinho com a setinha para cima) e depois em <b>“Adicionar à Tela de Início”</b>.</p>`
+    :`<p class="muted small" style="margin:0">No Chrome do celular, toque nos três pontinhos (⋮) no canto de cima e depois em <b>“Instalar app”</b> ou <b>“Adicionar à tela inicial”</b>.</p>`;
+  return `<div class="card" id="passoInstalar" style="display:flex;flex-direction:column;gap:10px"><b>1º passo: coloque o Caderninho na tela do celular</b><span class="muted small">Vai aparecer um ícone igual ao de um aplicativo. Funciona até sem internet.</span>${como}</div>
+    <p class="muted small" style="margin:0;text-align:center"><b>2º passo:</b> ${pedidoInstalar||ehIphone()?'abra pelo ícone novo e ':''}crie sua conta</p>`;
 }
 
 /* ---------- estado da tela ---------- */
@@ -973,7 +982,8 @@ function vPortao(est){
     <h1>Boas-vindas ao Caderninho</h1>
     <p class="muted">Anote quem comprou fiado, quanto deve e quem já pagou. As contas o Caderninho faz sozinho.</p>
     <div class="card oferta"><b>${DIAS_GRATIS} dias grátis</b><span class="muted small">${ofertaTxt()}</span></div>
-    <button class="btn" data-act="contaCriar">Criar minha conta</button>
+    ${passoInstalar()}
+    <button class="btn${instalado()?'':' soft'}" data-act="contaCriar">Criar minha conta</button>
     <button class="btn ghost" data-act="contaEntrar">Já tenho conta: entrar</button>
     <p class="muted small">Para usar o Caderninho, crie sua conta com seu nome, e-mail e uma senha. Suas vendas, clientes e produtos ficam guardados neste celular e na sua conta: se trocar de celular, é só entrar de novo. E dá para usar em mais de um celular ao mesmo tempo.</p>
   </section>`;
