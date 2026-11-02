@@ -8,8 +8,8 @@ quanto vendeu no mês, quanto já recebeu e o lucro.
 > Começou como **Caderninho dos Doces**, só para quem vende bolo de pote. Em 30/10/2026 virou um caderninho
 > de fiado para qualquer negócio, com visual novo (veja `docs/historico.md`). As contas antigas continuam valendo.
 
-**Endereço do app:** https://danielfps.github.io/caderninho-dos-doces/
-(já publicado; o passo "Ligar a publicação" abaixo já foi feito)
+**Endereço do app (Caderninho de Fiado):** https://danielfps.github.io/caderninho-de-fiado/
+(já publicado. O endereço antigo, https://danielfps.github.io/caderninho-dos-doces/, é o Caderninho dos Doces, versão de teste que não muda mais)
 
 ## O que ele faz
 

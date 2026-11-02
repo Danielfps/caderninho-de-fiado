@@ -29,8 +29,8 @@ Enquanto CONTA_URL e CONTA_CHAVE estiverem vazios, o app abre no MODO DE TESTE: 
 3. **Colocar no app**: em `app/index.html`, procure `CONTA_URL` e `CONTA_CHAVE` e preencha.
    (Ou mande os dois para o Claude Code fazer isso.) A chave pública pode ficar no código: é feita para isso.
 4. **Endereços de volta**: *Authentication → URL Configuration*:
-   - Site URL: `https://danielfps.github.io/caderninho-dos-doces/`
-   - Redirect URLs: `https://danielfps.github.io/caderninho-dos-doces/**`
+   - Site URL: `https://danielfps.github.io/caderninho-de-fiado/`
+   - Redirect URLs: `https://danielfps.github.io/caderninho-de-fiado/**`
      (para testar no computador, adicione também `http://localhost:8000/**`)
 5. **Cadastro por e-mail**: *Authentication → Sign In / Providers → Email*:
    - Email ligado e **Confirm email** ligado (é o que valida o e-mail da pessoa).

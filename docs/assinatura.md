@@ -28,7 +28,7 @@ No painel do Mercado Pago, abra a aplicação do Caderninho e copie o Access Tok
 ```sh
 supabase secrets set MP_ACCESS_TOKEN="TOKEN_DO_MERCADO_PAGO"
 supabase secrets set MP_WEBHOOK_SECRET="SEGREDO_DO_WEBHOOK"
-supabase secrets set APP_URLS="https://danielfps.github.io/caderninho-dos-doces/,http://localhost:8000/"
+supabase secrets set APP_URLS="https://danielfps.github.io/caderninho-de-fiado/,http://localhost:8000/"
 ```
 
 O Supabase fornece `SUPABASE_URL`, `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` às funções. Nunca coloque o token do Mercado Pago nem a chave `service_role` no app.
