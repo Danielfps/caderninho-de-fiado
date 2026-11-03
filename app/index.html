@@ -706,8 +706,8 @@ function restaurar(txt){
    As vendas, clientes e produtos continuam só no celular: nada disso vai para o servidor.
    Com CONTA_URL e CONTA_CHAVE vazios, o app abre no MODO DE TESTE: o servidor de mentira (teste, mais abaixo)
    responde no lugar do Supabase, as contas ficam só neste aparelho e nada é cobrado. */
-const CONTA_URL='';   // ex.: 'https://abcdefghij.supabase.co'
-const CONTA_CHAVE=''; // chave pública do projeto (anon ou publishable): pode ficar no código. NUNCA a service_role.
+const CONTA_URL='https://gwgwivkqhssmuqlyjkon.supabase.co';   // ex.: 'https://abcdefghij.supabase.co'
+const CONTA_CHAVE='sb_publishable_R5eOjfNa3gGEIhUsmgH4fw_vyyzxtXa'; // chave pública do projeto (anon ou publishable): pode ficar no código. NUNCA a service_role.
 const DIAS_GRATIS=3;  // só para os textos: quem conta os dias de verdade é o servidor
 const KEY_CONTA='caderninho-conta',KEY_ACESSO='caderninho-acesso',KEY_PAGANDO='caderninho-pagando',KEY_TESTE='caderninho-teste';
 const modoTeste=()=>!CONTA_URL&&!CONTA_CHAVE;          // os dois vazios: modo de teste
