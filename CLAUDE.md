@@ -119,30 +119,37 @@ Ficam no aparelho: IndexedDB `caderninho` → store `kv` → chave `caderninho-v
   (`ajustes` só nas cópias novas; ao recuperar uma cópia sem ele, o nome do negócio atual fica).
   Qualquer mudança de formato precisa continuar lendo dados e cópias antigas.
 
-## Conta e assinatura (31/10/2026)
+## Conta e assinatura
 
-- **A conta é obrigatória.** Sem conta, sem teste grátis válido e sem assinatura, `render()` mostra o "portão"
+- **A conta é obrigatória.** Sem conta, sem teste grátis válido e sem pagamento vigente, `render()` mostra o "portão"
   (`vPortao()`, `<section id="portao" data-estado="entrar|codigo|conferindo|assinar">`) no lugar do caderninho e o
   `<body>` ganha a classe `trancado` (some o rodapé). Os dados do caderninho nunca são apagados por isso.
-- Regra: **3 dias grátis** a partir da criação da conta; depois, um dos planos (02/11/2026): **mensal** no cartão pelo
-  Mercado Pago (assinatura sem plano, `/preapproval`), **1º mês R$ 14,90** (uma vez por conta) e depois **R$ 19,90**
-  (o servidor sobe o valor depois da 1ª cobrança aprovada); ou **anual R$ 149,90**, pagamento único no Checkout Pro
-  (Pix ou cartão), vale 365 dias e não renova sozinho (tabela `compras`, `registrar_compra()`). Preços na tabela
-  `planos` (`mensal`, `mensal_promo`, `anual`). Telas: `cartoesPlanos()`, `telaAssinar()`, `precos()`, `anualAgora()`. Quem decide é o servidor: `minha_situacao()` devolve `liberado_ate` pelo relógio dele.
-  O app guarda a última resposta em `localStorage['caderninho-acesso']` (com `dif` = relógio do servidor menos o do
-  celular) para abrir sem internet; se o relógio do celular voltar para trás, pede para conferir de novo.
+- Regra: **3 dias grátis** a partir da criação da conta. Depois, a pessoa escolhe um pagamento único no Checkout Pro,
+  por Pix ou cartão, sem informar e-mail para o pagamento e sem cobrança automática. O plano **mensal** vale 30 dias:
+  R$ 14,90 na primeira compra mensal aprovada da conta, depois R$ 19,90. O plano **anual** vale 12 meses (365 dias)
+  por R$ 149,90. A promoção mensal volta se a compra que a consumiu for estornada. Os preços ficam em `planos`
+  (`mensal`, `mensal_promo`, `anual`); as compras e suas validades ficam em `compras`. `registrar_compra()` registra
+  cada `payment_id` de forma idempotente. O prazo de cada compra começa no maior entre agora, o fim do teste grátis e
+  a validade mais distante das compras aprovadas, então os pagamentos somam.
+  As telas usam `cartoesPlanos()`, `telaAssinar()` e `precos()`. O servidor decide o acesso: `minha_situacao()` devolve
+  `agora`, `teste_ate`, `pago_ate`, `plano`, `liberado_ate` e preços. O app usa `pago_ate` e `plano` para mostrar o
+  plano e sua validade.
 - Tudo no bloco "minha conta e assinatura" de `app/index.html`. Cliques `conta*`, `assin*` e `teste*` vão para
   `acaoConta()`. `estadoConta()` diz em que pé está; `verificarAcesso(viaMP)` pergunta ao servidor e só redesenha
   se o estado mudou (para não apagar uma venda sendo digitada). Aviso no Resumo: `bannerAssinatura()`.
-- Servidor em `supabase/` (Esquadro/Codex): migração com `planos` (preço, leitura pública), `assinaturas` (só leitura
-  da própria linha) e `minha_situacao()`; Edge Functions `assinatura` (`criar` devolve o `init_point` do Mercado Pago,
-  `conferir` busca no Mercado Pago e atualiza) e `mp-webhook` (aviso do Mercado Pago, confere o `x-signature`).
-  Como ligar: `docs/conta.md` e `docs/assinatura.md`. Migrações novas: `202611020001_sincronizar.sql` e
-  `202611020002_planos.sql`.
+- Servidor em `supabase/`: `assinatura` cria uma preferência do Checkout Pro e devolve `init_point`; `conferir` consulta
+  o Mercado Pago pelo `payment_id` e pelas referências de mensal e anual da conta. `mp-webhook` recebe avisos em
+  `notification_url` e busca o pagamento em `GET /v1/payments/{id}` com o token da aplicação. Não valida HMAC: o aviso
+  não é prova de pagamento; a função confere no Mercado Pago a referência, a moeda, o valor e o status antes de chamar
+  `registrar_compra()`. A migração `202611050001_pagamento_unico.sql` muda os planos aceitos em `compras`, substitui
+  `registrar_compra()` e faz `minha_situacao()` calcular o acesso por teste grátis e compras aprovadas. A tabela
+  `assinaturas` antiga permanece no banco, mas não participa desse cálculo. Veja também `docs/conta.md` e
+  `docs/assinatura.md`.
 - `CONTA_URL` / `CONTA_CHAVE` (chave **pública**, nunca a `service_role`). **Vazios = MODO DE TESTE**: o objeto
   `teste` faz o papel do servidor (mesmas regras, contas em `localStorage['caderninho-teste']`), aparece o botão 🧪
-  no alto com o painel (passar 1 dia, fim do teste grátis, passar 1 mês, cancelar, apagar contas de teste) e o
-  pagamento é de mentira. Preencheu os dois, o modo de teste some sozinho.
+  no alto com o painel (passar 1 dia, fim do teste grátis, passar 1 mês e apagar contas de teste) e o pagamento é de
+  mentira. Cada aprovação de teste soma 30 ou 365 dias depois do fim do teste grátis. Preencheu os dois, o modo de
+  teste some sozinho.
 - Mudou uma regra de acesso? Mude nos 3 lugares: `minha_situacao()` (SQL), `calcularLiberadoAte()`
   (`supabase/functions/_shared/assinatura.mjs`) e `teste.situacao()` (app).
 
@@ -174,10 +181,11 @@ Ficam no aparelho: IndexedDB `caderninho` → store `kv` → chave `caderninho-v
 dá para testar o fluxo (cadastrar produto → anotar venda, com produto e valor digitado → receber pagamento →
 conferir Resumo) num celular emulado (`devices['Pixel 7']`).
 
-- **Conta e assinatura:** `node testes/conta.test.mjs` (Playwright + Chromium ficam em `testes/node_modules`; se faltar,
+- **Conta e pagamento:** `node testes/conta.test.mjs` (Playwright + Chromium ficam em `testes/node_modules`; se faltar,
   `cd testes && npm i @playwright/test && npx playwright install chromium`). Roda o app no modo de teste num Pixel 7:
-  criar conta, teste grátis, fim dos 3 dias, pagamento de teste, renovação, cancelamento, sair e entrar. Tira prints
-  em `testes/prints/`. Tem que dar 0 falha. Servidor: `node --test testes/assinatura.test.mjs`.
+  navegador social no Android e iPhone, criar conta, teste grátis, fim dos 3 dias, escolher plano, pagamento de teste
+  avulso, vencimento mensal, sair e entrar e volta com `payment_id`. Tira prints em `testes/prints/`. Tem que dar 0
+  falha. Servidor: `node --test testes/assinatura.test.mjs`.
 - **Vários celulares, sem internet, planos:** `node testes/sincronizar.e2e.mjs` (dois celulares contra o Supabase de
   mentira `testes/supabase-falso.mjs`, que roda as migrações de verdade no PGlite). Tem que dar 0 falha.
   SQL e servidor: `node --test testes/sincronizar.test.mjs testes/supabase-falso.test.mjs testes/assinatura.test.mjs`.

@@ -1,13 +1,13 @@
 # Graph Report - caderninho-dos-doces  (2026-11-04)
 
 ## Corpus Check
-- 34 files · ~48,350 words
+- 34 files · ~48,475 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .webmanifest 1, .toml 1)
 
 ## Summary
-- 440 nodes · 920 edges · 23 communities (20 shown, 3 thin omitted)
-- Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 62 edges (avg confidence: 0.93)
+- 440 nodes · 921 edges · 23 communities (20 shown, 3 thin omitted)
+- Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 63 edges (avg confidence: 0.93)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -22,7 +22,7 @@
 - ciclo
 - supabase-falso.mjs
 - criarSupabaseFalso
-- responder
+- agora
 - conta.test.mjs
 - planilha_xlsx.py
 - Histórico do projeto
@@ -108,7 +108,7 @@ Nodes (6): como(), raiz, rpc(), usuarios, erro(), raiz
 Cohesion: 0.24
 Nodes (18): b64(), criarSupabaseFalso(), aprovarAnual(), aprovarMensal(), authDa(), comClaims(), corpo(), decodificar() (+10 more)
 
-### Community 11 - "responder"
+### Community 11 - "agora"
 Cohesion: 0.19
 Nodes (17): agora(), aprovar(), conta(), dados(), gravar(), mudar(), mudou(), responder() (+9 more)
 
@@ -152,13 +152,13 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `brl()` connect `trazerPlanilha` to `sincronizar.e2e.mjs`?**
   _High betweenness centrality (0.142) - this node is a cross-community bridge._
-- **Are the 2 inferred relationships involving `acaoConta()` (e.g. with `sessao()` and `Conta e assinatura (31/10/2026)`) actually correct?**
+- **Are the 2 inferred relationships involving `acaoConta()` (e.g. with `sessao()` and `Conta e assinatura`) actually correct?**
   _`acaoConta()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `index.html` be split into smaller, more focused modules?**
   _Cohesion score 0.05647517039922103 - nodes in this community are weakly interconnected._
 - **Why does `Como é feito` connect `trazerPlanilha` to `index.html`, `acaoConta`?**
   _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Are the 2 inferred relationships involving `render()` (e.g. with `Como é feito` and `Conta e assinatura (31/10/2026)`) actually correct?**
+- **Are the 2 inferred relationships involving `render()` (e.g. with `Como é feito` and `Conta e assinatura`) actually correct?**
   _`render()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `acaoConta` be split into smaller, more focused modules?**
   _Cohesion score 0.11184939091915837 - nodes in this community are weakly interconnected._

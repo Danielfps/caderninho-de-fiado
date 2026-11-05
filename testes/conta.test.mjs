@@ -245,12 +245,12 @@ async function fluxo() {
     await print('05-portao-assinar');
   });
 
-  await passo('4. Abrir checkout de teste e aprovar o pagamento simulado', async () => {
-    await pagina.locator('#app #portao [data-act="assinar"]').click();
-    await expect(pagina.locator('#sheet #pEmail')).toBeVisible();
-    await expect(pagina.locator('#pEmail')).toHaveValue(email);
-    await print('06-assinar-email');
-    await pagina.locator('#sheet [data-act="assinIr"]').click();
+  await passo('4. Escolher um plano e aprovar o pagamento avulso simulado', async () => {
+    await expect(pagina.locator('#app #portao [data-act="assinPlano"]')).toHaveCount(2);
+    await expect(pagina.locator('#app #portao [data-act="assinIr"]')).toContainText('14,90');
+    await expect(pagina.locator('#app #portao #pEmail')).toHaveCount(0);
+    await print('06-escolher-plano');
+    await pagina.locator('#app #portao [data-act="assinIr"]').click();
     await expect(pagina.locator('[data-act="testePagar"]')).toBeVisible();
     await print('07-pagamento-de-teste');
     await pagina.locator('[data-act="testePagar"]').click();
@@ -270,20 +270,11 @@ async function fluxo() {
     await print('09-apos-recarregar');
   });
 
-  await passo('5. Passar um mês e continuar liberado por renovação automática', async () => {
-    await clicarAcaoTeste('testeMes');
-    await expect(pagina.locator('body')).not.toHaveClass(/\btrancado\b/);
-    await expect(pagina.locator('#app #portao')).toHaveCount(0);
-    await conferirCliente();
-    await print('10-renovacao-automatica');
-  });
-
-  await passo('5. Cancelar, avançar um mês e exigir assinatura novamente', async () => {
-    await clicarAcaoTeste('testeCancelar');
+  await passo('5. Pagamento mensal vale por 30 dias e não renova sozinho', async () => {
     await clicarAcaoTeste('testeMes');
     await expect(pagina.locator('body')).toHaveClass(/\btrancado\b/);
     await expect(pagina.locator('#app #portao')).toHaveAttribute('data-estado', 'assinar');
-    await print('11-assinatura-cancelada');
+    await print('10-pagamento-vencido');
   });
 
   await passo('6. Sair da conta e voltar ao portão entrar', async () => {
@@ -345,10 +336,10 @@ async function fluxo() {
       await print('16-configuracao-parcial');
     });
     await passo('Volta do pagamento sem conta mostra o caminho até o ícone', async () => {
-      await pagina.goto(`${url}?preapproval_id=abc123`, { waitUntil: 'domcontentloaded' });
+      await pagina.goto(`${url}?payment_id=123&status=approved`, { waitUntil: 'domcontentloaded' });
       await expect(pagina.locator('#sheet')).toBeVisible();
       await expect(pagina.locator('#sheet h1')).toHaveText('Falta só voltar ao Caderninho');
-      await expect(pagina).not.toHaveURL(/preapproval_id/);
+      await expect(pagina).not.toHaveURL(/payment_id/);
       await pagina.goto(`${url}?payment_id=123&status=rejected`, { waitUntil: 'domcontentloaded' });
       await expect(pagina.locator('#sheet h1')).toHaveText('O pagamento não foi aprovado');
       await print('17-volta-sem-conta');

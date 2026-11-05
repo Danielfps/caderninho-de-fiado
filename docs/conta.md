@@ -1,6 +1,6 @@
 # Minha conta: como ligar
 
-Agora a conta no Caderninho de Fiado é obrigatória: quem abre o app cria a conta (nome, e-mail e senha) ou entra. Cada conta tem 3 dias grátis e depois precisa de assinatura mensal. O passo a passo do pagamento fica em [docs/assinatura.md](assinatura.md).
+Agora a conta no Caderninho de Fiado é obrigatória: quem abre o app cria a conta (nome, e-mail e senha) ou entra. Cada conta tem 3 dias grátis e depois pode escolher um pagamento único pelo Checkout Pro, por Pix ou cartão: plano mensal por 30 dias ou anual por 12 meses. O pagamento não pede e-mail no Caderninho e não renova automaticamente. O passo a passo fica em [docs/assinatura.md](assinatura.md).
 
 A tela "Minha conta" (o bonequinho no alto, ao lado da engrenagem) usa o **Supabase Auth**: ele guarda
 as contas, manda os e-mails de confirmação e de "esqueci minha senha" e cuida da proteção em 2 etapas.
@@ -82,4 +82,4 @@ Assunto: `Criar uma senha nova no Caderninho de Fiado`
 
 ## Próximo passo: pagamento
 
-Para ver o passo a passo do pagamento e da assinatura mensal, consulte [docs/assinatura.md](assinatura.md).
+Para ver o passo a passo dos pagamentos únicos mensal e anual, consulte [docs/assinatura.md](assinatura.md).

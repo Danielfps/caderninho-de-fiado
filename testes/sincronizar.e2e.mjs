@@ -303,11 +303,10 @@ await passo('Planos: fim do teste grátis mostra mensal (14,90 → 19,90) e anua
 await passo('Plano anual: vai ao Mercado Pago, paga e volta liberado', async () => {
   await A.pagina.route('https://www.mercadopago.com.br/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Mercado Pago de mentira</h1>' }));
   await A.pagina.locator('#portao [data-act="assinPlano"][data-v="anual"]').click();
-  await A.pagina.locator('#portao [data-act="assinar"]').click();
-  await expect(A.pagina.locator('#sheet [data-act="assinIr"]')).toContainText('149,90');
-  await Promise.all([A.pagina.waitForURL(/mercadopago\.com\.br/), A.pagina.locator('#sheet [data-act="assinIr"]').click()]);
-  await falso.aprovarAnual(conta1.email);
-  await A.pagina.goto(`${base}?collection_id=123&collection_status=approved&payment_id=123&status=approved&external_reference=x&preference_id=falso-1`, { waitUntil: 'domcontentloaded' });
+  await expect(A.pagina.locator('#portao [data-act="assinIr"]')).toContainText('149,90');
+  await Promise.all([A.pagina.waitForURL(/mercadopago\.com\.br/), A.pagina.locator('#portao [data-act="assinIr"]').click()]);
+  const pagamentoAnual = await falso.aprovarAnual(conta1.email);
+  await A.pagina.goto(`${base}?payment_id=${pagamentoAnual}&status=approved`, { waitUntil: 'domcontentloaded' });
   await liberado(A.pagina);
   await A.pagina.locator('#btnConta').click();
   await expect(A.pagina.locator('#sheet')).toContainText('Plano anual');
@@ -321,14 +320,13 @@ await passo('Plano mensal: 1º mês promocional e depois a promoção some', asy
   await entrar(E.pagina, conta2);
   await portao(E.pagina, 'assinar');
   await E.pagina.route('https://www.mercadopago.com.br/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Mercado Pago de mentira</h1>' }));
-  await E.pagina.locator('#portao [data-act="assinar"]').click();
-  await expect(E.pagina.locator('#sheet [data-act="assinIr"]')).toContainText('14,90');
-  await Promise.all([E.pagina.waitForURL(/mercadopago\.com\.br/), E.pagina.locator('#sheet [data-act="assinIr"]').click()]);
-  await falso.aprovarMensal(conta2.email);
-  await E.pagina.goto(`${base}?preapproval_id=falso-1`, { waitUntil: 'domcontentloaded' });
+  await expect(E.pagina.locator('#portao [data-act="assinIr"]')).toContainText('14,90');
+  await Promise.all([E.pagina.waitForURL(/mercadopago\.com\.br/), E.pagina.locator('#portao [data-act="assinIr"]').click()]);
+  const pagamentoMensal = await falso.aprovarMensal(conta2.email);
+  await E.pagina.goto(`${base}?payment_id=${pagamentoMensal}&status=approved`, { waitUntil: 'domcontentloaded' });
   await liberado(E.pagina);
   await E.pagina.locator('#btnConta').click();
-  await expect(E.pagina.locator('#sheet')).toContainText('Mensal ativa');
+  await expect(E.pagina.locator('#sheet')).toContainText('Plano mensal');
   await print(E.pagina, '08-E-mensal');
   await E.contexto.close();
 });
