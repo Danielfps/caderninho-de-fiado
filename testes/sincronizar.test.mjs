@@ -86,23 +86,56 @@ test('migrações reais: páginas respeitam revisão e cursor sem perda nem repe
   assert.equal(recebidos.length,1500); assert.equal(new Set(recebidos).size,1500);
 });
 
-test('migrações reais: situação, compra anual idempotente, extensões e estorno', async t => {
+test('migrações reais: compras únicas mensais e anuais, teste grátis, soma, idempotência e estorno', async t => {
   const db=await criarBanco(); t.after(()=>db.close());
   const su=()=>como(db,usuarios.ana,()=>db.query('select public.minha_situacao() as s'));
   let situacao=(await su()).rows[0].s;
-  assert.equal(situacao.preco_promo,14.9); assert.equal(situacao.preco_anual,149.9); assert.equal(situacao.plano,null);
-  const comprar=(id,ok=true)=>como(db,usuarios.ana,()=>db.query('select public.registrar_compra($1,$2,$3,$4) as r',[id,usuarios.ana,149.9,ok]),{role:'service_role'});
-  await assert.rejects(()=>como(db,usuarios.ana,()=>db.query('select public.registrar_compra($1,$2,$3,true)',['negado',usuarios.ana,149.9]),{role:'authenticated'}),/permission denied/);
-  const primeira=(await comprar('pay-1')).rows[0].r;
-  await comprar('pay-1');
-  const segunda=(await comprar('pay-2')).rows[0].r;
-  assert.equal(new Date(segunda.valido_ate).getTime()-new Date(primeira.valido_ate).getTime(),365*86400000);
-  situacao=(await su()).rows[0].s; assert.equal(situacao.plano,'anual'); assert.equal(situacao.preco_promo,14.9);
-  await comprar('pay-1',false);
-  situacao=(await su()).rows[0].s; assert.equal(situacao.anual_ate,segunda.valido_ate);
+  assert.equal(situacao.preco_promo,14.9); assert.equal(situacao.preco,19.9); assert.equal(situacao.preco_anual,149.9);
+  assert.equal(situacao.pago_ate,null); assert.equal(situacao.plano,null); assert.equal(situacao.liberado_ate,situacao.teste_ate);
+  assert.equal('assinatura' in situacao,false); assert.equal('valido_ate' in situacao,false); assert.equal('anual_ate' in situacao,false);
+  const comprar=(id,plano='mensal',valor=plano==='mensal'?14.9:149.9,ok=true,user=usuarios.ana)=>
+    como(db,user,()=>db.query('select public.registrar_compra($1,$2,$3,$4,$5) as r',[id,user,valor,ok,plano]),{role:'service_role'});
+  await assert.rejects(()=>como(db,usuarios.ana,()=>db.query('select public.registrar_compra($1,$2,$3,$4,$5)',['negado',usuarios.ana,14.9,true,'mensal']),{role:'authenticated'}),/permission denied/);
+  await assert.rejects(()=>comprar('plano-invalido','semanal',3),/parametros_invalidos/);
+
+  const primeira=(await comprar('pay-m1')).rows[0].r;
+  assert.equal(primeira.plano,'mensal');
+  assert.equal(new Date(primeira.valido_ate).getTime()-new Date(primeira.valido_de).getTime(),30*86400000);
+  assert.equal(new Date(primeira.valido_de).getTime(),new Date(situacao.teste_ate).getTime());
+  const repetida=(await comprar('pay-m1')).rows[0].r;
+  assert.equal(repetida.valido_ate,primeira.valido_ate);
+  situacao=(await su()).rows[0].s;
+  assert.equal(situacao.pago_ate,primeira.valido_ate); assert.equal(situacao.plano,'mensal'); assert.equal(situacao.preco_promo,null);
+  await comprar('pay-m1','mensal',14.9,false);
+  situacao=(await su()).rows[0].s;
+  assert.equal(situacao.pago_ate,null); assert.equal(situacao.plano,null); assert.equal(situacao.preco_promo,14.9);
+  assert.equal(situacao.liberado_ate,situacao.teste_ate);
+
+  const mensal=(await comprar('pay-m2')).rows[0].r;
+  const anual=(await comprar('pay-a1','anual')).rows[0].r;
+  assert.equal(new Date(mensal.valido_de).getTime(),new Date(situacao.teste_ate).getTime());
+  assert.equal(new Date(mensal.valido_ate).getTime()-new Date(mensal.valido_de).getTime(),30*86400000);
+  assert.equal(new Date(anual.valido_de).getTime(),new Date(mensal.valido_ate).getTime());
+  assert.equal(new Date(anual.valido_ate).getTime()-new Date(anual.valido_de).getTime(),365*86400000);
+  situacao=(await su()).rows[0].s;
+  assert.equal(situacao.pago_ate,anual.valido_ate); assert.equal(situacao.plano,'anual'); assert.equal(situacao.preco_promo,null);
+  await comprar('pay-a1','anual',149.9,false);
+  situacao=(await su()).rows[0].s;
+  assert.equal(situacao.pago_ate,mensal.valido_ate); assert.equal(situacao.plano,'mensal'); assert.equal(situacao.preco_promo,null);
+  await comprar('pay-m2','mensal',14.9,false);
+  situacao=(await su()).rows[0].s;
+  assert.equal(situacao.pago_ate,null); assert.equal(situacao.plano,null); assert.equal(situacao.preco_promo,14.9);
+
+  const antiga=(await comprar('pay-old','mensal',14.9,true,usuarios.bia)).rows[0].r;
+  await db.query('update public.compras set valido_de=now()-interval \'40 days\',valido_ate=now()-interval \'10 days\' where mp_payment_id=$1',[antiga.mp_payment_id]);
+  await db.query('insert into public.assinaturas(user_id,status,valido_ate) values($1,$2,now()+interval \'90 days\')',[usuarios.ana,'ativa']);
+  const semCompraAtual=await como(db,usuarios.bia,()=>db.query('select public.minha_situacao() s'));
+  assert.equal(semCompraAtual.rows[0].s.plano,'mensal');
+  assert.ok(new Date(semCompraAtual.rows[0].s.pago_ate)<new Date(semCompraAtual.rows[0].s.agora));
+  situacao=(await su()).rows[0].s; assert.equal(situacao.pago_ate,null); assert.equal(situacao.liberado_ate,situacao.teste_ate);
+  await db.query("update public.planos set ativo=false where id='mensal_promo'");
+  situacao=(await su()).rows[0].s; assert.equal(situacao.preco_promo,null);
   const comprasAna=await como(db,usuarios.ana,()=>db.query('select count(*)::int n from public.compras'));
   const comprasBia=await como(db,usuarios.bia,()=>db.query('select count(*)::int n from public.compras'));
-  assert.equal(comprasAna.rows[0].n,2); assert.equal(comprasBia.rows[0].n,0);
-  await db.query('insert into public.assinaturas(user_id,status,valido_ate,promo_consumida_em) values($1,$2,now()+interval \'2 days\',now())',[usuarios.ana,'ativa']);
-  situacao=(await su()).rows[0].s; assert.equal(situacao.preco_promo,null); assert.equal(situacao.plano,'anual');
+  assert.equal(comprasAna.rows[0].n,3); assert.equal(comprasBia.rows[0].n,1);
 });

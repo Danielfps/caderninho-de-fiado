@@ -24,7 +24,7 @@ export async function criarSupabaseFalso(){
     grant execute on function auth.uid(),auth.jwt() to anon,authenticated,service_role;`);
   for(const file of (await readdir(path.join(raiz,'supabase/migrations'))).filter(x=>x.endsWith('.sql')).sort())
     await db.exec(await readFile(path.join(raiz,'supabase/migrations',file),'utf8'));
-  const contas=new Map(), sessoes=new Map(), refreshs=new Map(), linksMensais=new Map(), pedidos=[];
+  const contas=new Map(), sessoes=new Map(), refreshs=new Map(), preferencias=new Map(), pagamentos=new Map(), pedidos=[];
   const relogio={agora:Date.now(),avancar(ms){this.agora+=ms;}};
   let duracaoToken=3600, fora=false, contador=0;
   function tokenPara(sessao){const agora=Math.floor(relogio.agora/1000),exp=agora+duracaoToken;
@@ -86,7 +86,7 @@ export async function criarSupabaseFalso(){
         const nome=route.slice('rest/v1/rpc/'.length);const token=(req.headers.authorization??'').replace(/^Bearer\s+/i,'');const cl=token?decodificar(token):null;
         if(token&&!sessaoValida(req,res,'rest'))return;
         const role=cl?'authenticated':'anon';
-        const spec={sincronizar:['desde','mudancas','aparelho'],minha_situacao:[],registrar_compra:['p_payment_id','p_user','p_valor','p_aprovado']}[nome];if(!spec)return fim(404,{message:'function not found'});
+        const spec={sincronizar:['desde','mudancas','aparelho'],minha_situacao:[],registrar_compra:['p_payment_id','p_user','p_valor','p_aprovado','p_plano']}[nome];if(!spec)return fim(404,{message:'function not found'});
         try{const result=await comClaims(cl,role,async()=>{
           const args=spec.map(k=>body?.[k]??(k==='desde'?0:k==='mudancas'?'[]':null));
           const qs=args.map((_,i)=>`$${i+1}${nome==='sincronizar'&&i===1?'::jsonb':''}`).join(',');
@@ -97,23 +97,30 @@ export async function criarSupabaseFalso(){
       if(route==='functions/v1/assinatura'&&metodo==='POST'){
         const a=sessaoValida(req,res,'functions');if(!a)return;
         if(body?.acao==='conferir'){
+          const referencias=new Set([`mensal:${a.s.user.id}`,`anual:${a.s.user.id}`]);
+          const conferir=async pagamento=>{
+            if(!pagamento||!referencias.has(pagamento.external_reference))return;
+            const plano=pagamento.external_reference.startsWith('mensal:')?'mensal':'anual';
+            const estorno=['refunded','charged_back','cancelled','canceled'].includes(pagamento.status);
+            if(pagamento.status==='approved'||estorno){
+              await comClaims({role:'service_role'},'service_role',async()=>db.query(
+                'select public.registrar_compra($1,$2,$3,$4,$5)',
+                [String(pagamento.id),a.s.user.id,Number(pagamento.transaction_amount)||0,pagamento.status==='approved',plano]));
+            }
+          };
+          if(body.pagamento_id!==undefined)await conferir(pagamentos.get(String(body.pagamento_id)));
+          for(const pagamento of pagamentos.values())await conferir(pagamento);
           const situacao=await comClaims({sub:a.s.user.id,role:'authenticated',aal:a.claims.aal},'authenticated',async()=> (await db.query('select public.minha_situacao() s')).rows[0].s);
           return fim(200,{situacao});
         }
         if(body?.acao!=='criar')return fim(400,{erro:'pedido'});
-        const rows=await sql('select * from public.assinaturas where user_id=$1',[a.s.user.id]);const atual=rows[0];
-        if(atual?.status==='ativa'&&atual.valido_ate&&new Date(atual.valido_ate)>new Date(relogio.agora))return fim(409,{erro:'ja_ativa'});
-        const anual=(body.plano||'mensal')==='anual';
-        const precos=await sql('select id,valor from public.planos where ativo=true');const preco=id=>Number(precos.find(p=>p.id===id)?.valor);
+        if(body.plano!=='mensal'&&body.plano!=='anual')return fim(400,{erro:'pedido'});
         const situacao=await comClaims({sub:a.s.user.id,role:'authenticated',aal:a.claims.aal},'authenticated',async()=> (await db.query('select public.minha_situacao() s')).rows[0].s);
-        if(situacao.anual_ate&&new Date(situacao.anual_ate)>new Date(relogio.agora+7*86400000))return fim(409,{erro:'ja_paga'});
-        if(anual){const init=`https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=falso-${++contador}`;return fim(200,{init_point:init});}
-        const valor=atual?.promo_consumida_em?preco('mensal'):preco('mensal_promo');
-        const chaveLink=`${a.s.user.id}:${valor}:${String(body.email_pagador??a.s.user.email).toLowerCase()}`;
-        const existente=linksMensais.get(chaveLink);if(existente&&atual?.status==='pendente')return fim(200,{init_point:existente});
-        const id=`falso-${++contador}`,init=`https://www.mercadopago.com.br/subscriptions/checkout?preapproval_id=${id}`;linksMensais.set(chaveLink,init);
-        await sql(`insert into public.assinaturas(user_id,status,valido_ate,mp_preapproval_id,valor)
-          values($1,'pendente',$2,$3,$4) on conflict(user_id) do update set status=case when public.assinaturas.status='ativa' then 'ativa' else 'pendente' end,mp_preapproval_id=excluded.mp_preapproval_id,valor=excluded.valor,atualizado_em=now()`,[a.s.user.id,atual?.valido_ate??null,id,valor]);
+        if(situacao.pago_ate&&new Date(situacao.pago_ate)>new Date(relogio.agora+7*86400000))return fim(409,{erro:'ja_paga'});
+        const valor=Number(body.plano==='anual'?situacao.preco_anual:(situacao.preco_promo??situacao.preco));
+        if(!Number.isFinite(valor)||valor<=0)return fim(500,{erro:'config'});
+        const id=`falso-pref-${++contador}`,init=`https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=${id}`;
+        preferencias.set(id,{userId:a.s.user.id,plano:body.plano,valor,external_reference:`${body.plano}:${a.s.user.id}`});
         return fim(200,{init_point:init});
       }
       if(route.startsWith('functions/v1/'))return fim(404,{message:'not found'});
@@ -122,8 +129,27 @@ export async function criarSupabaseFalso(){
     }catch(e){return fim(500,{message:e.message});}
   }
   async function envelhecerConta(email,ms){await sql('update auth.users set created_at=created_at-$2::interval where lower(email)=lower($1)',[email,`${ms} milliseconds`]);}
-  async function aprovarMensal(email){const u=(await sql('select id from auth.users where lower(email)=lower($1)',[email]))[0];if(!u)throw Error('conta não encontrada');await sql(`insert into public.assinaturas(user_id,status,valido_ate,mp_preapproval_id,valor,promo_consumida_em)
-    values($1,'ativa',now()+interval '1 month','falso-aprovado',19.9,now()) on conflict(user_id) do update set status='ativa',valido_ate=now()+interval '1 month',valor=19.9,promo_consumida_em=coalesce(public.assinaturas.promo_consumida_em,now()),atualizado_em=now()`,[u.id]);}
-  async function aprovarAnual(email){const u=(await sql('select id from auth.users where lower(email)=lower($1)',[email]))[0];if(!u)throw Error('conta não encontrada');const p=(await sql("select valor from public.planos where id='anual' and ativo=true"))[0];if(!p)throw Error('plano anual indisponível');const id=`falso-payment-${++contador}`;return comClaims({role:'service_role'},'service_role',async()=>db.query('select public.registrar_compra($1,$2,$3,true)',[id,u.id,p.valor]));}
-  return {chave,tratar,get duracaoToken(){return duracaoToken;},set duracaoToken(n){duracaoToken=Number(n);},relogio,get fora(){return fora;},set fora(x){fora=!!x;},envelhecerConta,aprovarMensal,aprovarAnual,sql,pedidos,async fechar(){await db.close();}};
+  async function registrarAprovacao(email,plano){
+    const u=(await sql('select id from auth.users where lower(email)=lower($1)',[email]))[0];if(!u)throw Error('conta não encontrada');
+    const precos=await sql('select id,valor from public.planos where ativo=true');
+    const preco=id=>Number(precos.find(p=>p.id===id)?.valor)||0;
+    const jaMensal=(await sql("select 1 from public.compras where user_id=$1 and plano='mensal' and status='aprovada' limit 1",[u.id])).length>0;
+    const valor=plano==='anual'?preco('anual'):(jaMensal?preco('mensal'):(preco('mensal_promo')||preco('mensal')));
+    if(!valor)throw Error(`plano ${plano} indisponível`);
+    const id=`falso-payment-${++contador}`;
+    const pagamento={id,external_reference:`${plano}:${u.id}`,currency_id:'BRL',transaction_amount:valor,status:'approved'};
+    await comClaims({role:'service_role'},'service_role',async()=>db.query(
+      'select public.registrar_compra($1,$2,$3,true,$4)',[id,u.id,valor,plano]));
+    pagamentos.set(id,pagamento);
+    return id;
+  }
+  async function aprovarMensal(email){return registrarAprovacao(email,'mensal');}
+  async function aprovarAnual(email){return registrarAprovacao(email,'anual');}
+  async function estornarPagamento(id){
+    const pagamento=pagamentos.get(String(id));if(!pagamento)return false;
+    pagamento.status='refunded';const [,userId]=pagamento.external_reference.split(':');const plano=pagamento.external_reference.startsWith('mensal:')?'mensal':'anual';
+    await comClaims({role:'service_role'},'service_role',async()=>db.query('select public.registrar_compra($1,$2,$3,false,$4)',[String(id),userId,pagamento.transaction_amount,plano]));
+    return true;
+  }
+  return {chave,tratar,get duracaoToken(){return duracaoToken;},set duracaoToken(n){duracaoToken=Number(n);},relogio,get fora(){return fora;},set fora(x){fora=!!x;},envelhecerConta,aprovarMensal,aprovarAnual,estornarPagamento,preferencias,pagamentos,sql,pedidos,async fechar(){await db.close();}};
 }

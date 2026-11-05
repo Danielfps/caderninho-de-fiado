@@ -1,96 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  calcularLiberadoAte,
-  criarManifestoWebhook,
-  escolherPreapproval,
-  separarDuplicadas,
-  mapearStatusMercadoPago,
-  validadeNaoEncurtada,
-  precoParaCriar,
-  pagamentoAnualValido,
-  cobrancaAprovada,
-  novaValidadeAnual,
-} from "../supabase/functions/_shared/assinatura.mjs";
+import { isUuid, lerReferencia, pagamentoValido, referenciaDaConta, lerNotificacaoPagamento } from "../supabase/functions/_shared/assinatura.mjs";
 
-test("mapeia estados do Mercado Pago", () => {
-  assert.equal(mapearStatusMercadoPago("authorized"), "ativa");
-  assert.equal(mapearStatusMercadoPago("paused"), "pausada");
-  assert.equal(mapearStatusMercadoPago("cancelled"), "cancelada");
-  assert.equal(mapearStatusMercadoPago("canceled"), "cancelada");
-  assert.equal(mapearStatusMercadoPago("pending"), "pendente");
-  assert.equal(mapearStatusMercadoPago("unknown"), null);
+const ana = "11111111-1111-4111-8111-111111111111";
+const bia = "22222222-2222-4222-8222-222222222222";
+
+test("valida UUID e lê só referências mensal/anual da conta", () => {
+  assert.equal(isUuid(ana), true);
+  assert.equal(isUuid("not-a-uuid"), false);
+  assert.deepEqual(lerReferencia(`mensal:${ana}`), { plano: "mensal", userId: ana });
+  assert.deepEqual(lerReferencia(`anual:${ana}`), { plano: "anual", userId: ana });
+  assert.equal(lerReferencia(`semanal:${ana}`), null);
+  assert.equal(lerReferencia("mensal:not-a-uuid"), null);
+  assert.equal(lerReferencia("") , null);
 });
 
-test("liberação usa o maior prazo de teste e tolerância", () => {
-  const teste = "2026-11-04T12:00:00.000Z";
-  const validade = "2026-11-05T12:00:00.000Z";
-  assert.equal(calcularLiberadoAte({ testeAte: teste, assinatura: "ativa", validoAte: validade }), "2026-11-08T12:00:00.000Z");
-  assert.equal(calcularLiberadoAte({ testeAte: teste, assinatura: "cancelada", validoAte: validade }), validade);
-  assert.equal(calcularLiberadoAte({ testeAte: teste, assinatura: "pendente", validoAte: validade }), validade);
-  assert.equal(calcularLiberadoAte({ testeAte: teste, assinatura: "pendente", validoAte: null }), teste);
+test("pagamento aprovado exige BRL e o mínimo do plano", () => {
+  const mensalPromo = { id: 1, external_reference: `mensal:${ana}`, currency_id: "BRL", transaction_amount: 14.9, status: "approved" };
+  assert.deepEqual(pagamentoValido(mensalPromo, { mensalMinimo: 14.9, anual: 149.9 }), {
+    valido: true, aprovado: true, estornado: false, plano: "mensal", userId: ana,
+  });
+  assert.equal(pagamentoValido({ ...mensalPromo, transaction_amount: 14.89 }, { mensalMinimo: 14.9, anual: 149.9 }).valido, false);
+  assert.equal(pagamentoValido({ ...mensalPromo, currency_id: "USD" }, { mensalMinimo: 14.9, anual: 149.9 }).valido, false);
+  assert.equal(pagamentoValido({ ...mensalPromo, status: "pending" }, { mensalMinimo: 14.9, anual: 149.9 }).valido, false);
+  assert.equal(pagamentoValido({ ...mensalPromo, external_reference: `mensal:${bia}` }, { mensalMinimo: 14.9, anual: 149.9 }).userId, bia);
+  assert.equal(referenciaDaConta(`mensal:${bia}`, ana), null);
+  assert.deepEqual(referenciaDaConta(`mensal:${ana}`, ana), { plano: "mensal", userId: ana });
 });
 
-test("manifesto normaliza ID alfanumérico e mantém hífen", () => {
-  assert.equal(criarManifestoWebhook({ id: "ABcd123", requestId: "req-1", ts: "123" }), "id:abcd123;request-id:req-1;ts:123;");
-  assert.equal(criarManifestoWebhook({ id: "AB-CD", requestId: "req-1", ts: "123" }), "id:AB-CD;request-id:req-1;ts:123;");
+test("anual aprovado exige o preço anual configurado", () => {
+  const anual = { id: 2, external_reference: `anual:${ana}`, currency_id: "BRL", transaction_amount: 149.9, status: "approved" };
+  assert.equal(pagamentoValido(anual, { mensalMinimo: 14.9, anual: 149.9 }).valido, true);
+  assert.equal(pagamentoValido({ ...anual, transaction_amount: 149.89 }, { mensalMinimo: 14.9, anual: 149.9 }).valido, false);
+  assert.equal(pagamentoValido({ ...anual, currency_id: "USD" }, { mensalMinimo: 14.9, anual: 149.9 }).valido, false);
 });
 
-test("pausar ou cancelar preserva a validade paga", () => {
-  const anterior = "2026-12-01T00:00:00.000Z";
-  assert.equal(validadeNaoEncurtada("cancelada", anterior, "2026-11-01T00:00:00.000Z"), anterior);
-  assert.equal(validadeNaoEncurtada("pausada", anterior, null), anterior);
+test("estornos são reconhecidos para mensal e anual", () => {
+  for (const status of ["refunded", "charged_back", "cancelled", "canceled"]) {
+    const resultado = pagamentoValido({ external_reference: `mensal:${ana}`, currency_id: "BRL", status });
+    assert.equal(resultado.valido, true, status);
+    assert.equal(resultado.aprovado, false, status);
+    assert.equal(resultado.estornado, true, status);
+    assert.equal(resultado.plano, "mensal", status);
+  }
+  assert.equal(pagamentoValido({ external_reference: `anual:${ana}`, currency_id: "BRL", status: "refunded" }).plano, "anual");
+  assert.equal(pagamentoValido({ external_reference: `anual:${ana}`, currency_id: "USD", status: "refunded" }).valido, false);
 });
 
-test("evento pendente não altera a validade que já existia", () => {
-  const anterior = "2026-12-01T00:00:00.000Z";
-  assert.equal(validadeNaoEncurtada("pendente", anterior, "2026-11-01T00:00:00.000Z"), anterior);
-  assert.equal(validadeNaoEncurtada("pendente", null, "2026-11-01T00:00:00.000Z"), null);
-});
-
-test("escolhe a assinatura autorizada mesmo se não for o último link aberto", () => {
-  const lista = [
-    { id: "b", status: "pending", last_modified: "2026-10-31T12:10:00.000-03:00" },
-    { id: "a", status: "authorized", last_modified: "2026-10-31T12:05:00.000-03:00" },
-    { id: "c", status: "cancelled", last_modified: "2026-09-01T10:00:00.000-03:00" },
-  ];
-  assert.equal(escolherPreapproval(lista).id, "a");
-  assert.equal(escolherPreapproval(lista.filter((p) => p.id !== "a")).id, "b");
-  assert.equal(escolherPreapproval([]), null);
-});
-
-test("duas autorizadas: fica a mais antiga e a outra é duplicada", () => {
-  const lista = [
-    { id: "nova", status: "authorized", date_created: "2026-10-31T12:10:00.000-03:00" },
-    { id: "velha", status: "authorized", date_created: "2026-10-31T12:00:00.000-03:00" },
-    { id: "pend", status: "pending", date_created: "2026-10-31T12:20:00.000-03:00" },
-  ];
-  const { manter, duplicadas } = separarDuplicadas(lista);
-  assert.equal(manter.id, "velha");
-  assert.deepEqual(duplicadas.map((p) => p.id), ["nova"]);
-  assert.equal(escolherPreapproval(lista).id, "velha");
-  assert.deepEqual(separarDuplicadas([{ id: "x", status: "pending" }]), { manter: null, duplicadas: [] });
-});
-
-test('preço mensal aplica a promoção uma vez e anual usa seu próprio preço',()=>{
-  assert.deepEqual(precoParaCriar({}),{valor:14.9,promocional:true});
-  assert.deepEqual(precoParaCriar({promoConsumida:true}),{valor:19.9,promocional:false});
-  assert.deepEqual(precoParaCriar({plano:'anual'}),{valor:149.9,promocional:false});
-});
-
-test('pagamento anual só aceita referência da conta, aprovado em BRL e valor mínimo',()=>{
-  const base={external_reference:'anual:11111111-1111-4111-8111-111111111111',currency_id:'BRL',transaction_amount:149.9,status:'approved'};
-  assert.deepEqual(pagamentoAnualValido(base),{valido:true,userId:'11111111-1111-4111-8111-111111111111',aprovado:true});
-  assert.equal(pagamentoAnualValido({...base,currency_id:'USD'}).valido,false);
-  assert.equal(pagamentoAnualValido({...base,transaction_amount:149.88}).valido,false);
-  assert.deepEqual(pagamentoAnualValido({...base,status:'refunded'}),{valido:true,userId:'11111111-1111-4111-8111-111111111111',aprovado:false});
-});
-
-test('promoção só termina depois de prova de cobrança aprovada e validade anual soma 365 dias',()=>{
-  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}}}),false);
-  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summarized:{charged_quantity:1}}}),true);
-  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summary:{charged_quantity:1}}}),false);
-  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}},pagamento:{status:'processed',payment:{status:'approved'}}}),true);
-  assert.equal(novaValidadeAnual({agora:'2026-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');
-  assert.equal(calcularLiberadoAte({testeAte:'2026-01-02T00:00:00Z',anualAte:'2027-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');
+test("lê data.id do aviso e id/topic alternativos", () => {
+  assert.deepEqual(lerNotificacaoPagamento("https://hook.test/?data.id=123&type=payment"), { id: "123", tipo: "payment" });
+  assert.deepEqual(lerNotificacaoPagamento("https://hook.test/?id=456&topic=payment"), { id: "456", tipo: "payment" });
+  assert.deepEqual(lerNotificacaoPagamento("https://hook.test/", { data: { id: 789 }, type: "payment" }), { id: "789", tipo: "payment" });
+  assert.deepEqual(lerNotificacaoPagamento("https://hook.test/", { id: "987", topic: "payment" }), { id: "987", tipo: "payment" });
+  assert.deepEqual(lerNotificacaoPagamento("https://hook.test/?data.id=1", { data: { id: 2 } }), { id: "1", tipo: "" });
 });

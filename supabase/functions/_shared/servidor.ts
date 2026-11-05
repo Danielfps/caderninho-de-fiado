@@ -1,4 +1,4 @@
-import { isUuid, separarDuplicadas } from "./assinatura.mjs";
+import { isUuid } from "./assinatura.mjs";
 
 export type Config = {
   supabaseUrl: string;
@@ -8,7 +8,12 @@ export type Config = {
   appUrls: URL[];
 };
 
-export class MercadoPagoError extends Error {}
+export class MercadoPagoError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = "MercadoPagoError";
+  }
+}
 /* conta com proteção em 2 etapas, mas o token ainda não passou pelo código (aal1) */
 export class CodigoPendenteError extends Error {}
 
@@ -92,91 +97,13 @@ export async function chamarMercadoPago(config: Config, path: string, init: Requ
     if (!response.ok) {
       const causas = Array.isArray(data?.cause) ? data.cause.map((c: any) => c?.description ?? c?.code) : [];
       const motivo = [data?.message, data?.error, ...causas].filter(Boolean).join(" | ").slice(0, 300);
-      throw new MercadoPagoError(`Mercado Pago respondeu ${response.status} em ${path.split("?")[0]}: ${motivo}`);
+      throw new MercadoPagoError(`Mercado Pago respondeu ${response.status} em ${path.split("?")[0]}: ${motivo}`, response.status);
     }
     return data;
   } catch (error) {
     if (error instanceof MercadoPagoError) throw error;
     throw new MercadoPagoError("Falha de comunicação com o Mercado Pago");
   }
-}
-
-/* Todas as assinaturas da conta no Mercado Pago. */
-export async function buscarPreapprovals(config: Config, userId: string) {
-  const busca = await chamarMercadoPago(
-    config,
-    `/preapproval/search?external_reference=${encodeURIComponent(userId)}&limit=100`,
-  );
-  return (Array.isArray(busca?.results) ? busca.results : []).filter((p: any) => p?.id && p?.external_reference === userId);
-}
-
-/* Duas assinaturas autorizadas = duas cobranças por mês. Cancela as duplicadas e devolve a que fica.
-   Se não der para cancelar agora, registra no log; o próximo aviso ou "conferir" tenta de novo. */
-export async function cancelarDuplicadas(config: Config, lista: any[]) {
-  const { manter, duplicadas } = separarDuplicadas(lista);
-  for (const p of duplicadas) {
-    try {
-      await chamarMercadoPago(config, `/preapproval/${encodeURIComponent(p.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ status: "cancelled" }),
-      });
-      console.warn("Assinatura duplicada cancelada no Mercado Pago", p.id);
-    } catch (error) {
-      console.error("Não consegui cancelar a assinatura duplicada", p.id, error);
-    }
-  }
-  return manter;
-}
-
-export async function lerAssinatura(config: Config, userId: string) {
-  const query = new URLSearchParams({
-    select: "user_id,status,valido_ate,mp_preapproval_id,atualizado_em,promo_consumida_em,valor",
-    user_id: `eq.${userId}`,
-    limit: "1",
-  });
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/assinaturas?${query}`, {
-    headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}` },
-  });
-  if (!response.ok) throw new Error("Falha ao ler assinatura");
-  return (await response.json())[0] ?? null;
-}
-
-export async function gravarAssinatura(config: Config, userId: string, dados: Record<string, unknown>) {
-  const headers = {
-    apikey: config.serviceKey,
-    Authorization: `Bearer ${config.serviceKey}`,
-    "Content-Type": "application/json",
-    Prefer: "return=representation",
-  };
-  const current = await lerAssinatura(config, userId);
-  if (current) {
-    const query = new URLSearchParams({ user_id: `eq.${userId}` });
-    if (dados.status === "pendente") query.set("status", "neq.ativa");
-    const response = await fetch(`${config.supabaseUrl}/rest/v1/assinaturas?${query}`, {
-      method: "PATCH", headers, body: JSON.stringify(dados),
-    });
-    if (!response.ok) throw new Error("Falha ao atualizar assinatura");
-    const atualizada = (await response.json())[0] ?? null;
-    if (atualizada || dados.status !== "pendente") return atualizada;
-    const atual = await lerAssinatura(config, userId);
-    if (atual?.status === "ativa") {
-      const preserveQuery = new URLSearchParams({ user_id: `eq.${userId}`, status: "eq.ativa" });
-      const preserve = await fetch(`${config.supabaseUrl}/rest/v1/assinaturas?${preserveQuery}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({ mp_preapproval_id: dados.mp_preapproval_id, atualizado_em: dados.atualizado_em }),
-      });
-      if (!preserve.ok) throw new Error("Falha ao preservar assinatura ativa");
-      return (await preserve.json())[0] ?? atual;
-    }
-    return atual;
-  }
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/assinaturas`, {
-    method: "POST", headers, body: JSON.stringify({ user_id: userId, ...dados }),
-  });
-  if (response.status === 409) return await gravarAssinatura(config, userId, dados);
-  if (!response.ok) throw new Error("Falha ao criar assinatura");
-  return (await response.json())[0] ?? null;
 }
 
 export async function minhaSituacao(config: Config, authorization: string) {
@@ -204,26 +131,26 @@ export function urlDeVolta(config: Config, candidata: unknown) {
   }
 }
 
-export async function pegarPreco(config: Config) {
-  return await pegarPrecoPlano(config, "mensal");
-}
-
-export async function pegarPrecoPlano(config: Config, plano: string) {
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/planos?select=valor&id=eq.${encodeURIComponent(plano)}&ativo=eq.true&limit=1`, {
+export async function pegarPrecos(config: Config) {
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/planos?select=id,valor&ativo=eq.true&id=in.(mensal,mensal_promo,anual)`, {
     headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}` },
   });
-  if (!response.ok) throw new Error("Falha ao ler preço");
-  const preco = Number((await response.json())[0]?.valor);
-  if (!Number.isFinite(preco) || preco <= 0) throw new Error("Preço de plano inválido");
-  return preco;
+  if (!response.ok) throw new Error("Falha ao ler preços dos planos");
+  const linhas = await response.json();
+  const porId = new Map((Array.isArray(linhas) ? linhas : []).map((linha: any) => [String(linha.id), Number(linha.valor)]));
+  const ler = (id: string) => {
+    const valor = porId.get(id);
+    return Number.isFinite(valor) && valor > 0 ? valor : null;
+  };
+  return { mensal: ler("mensal"), promo: ler("mensal_promo"), anual: ler("anual") };
 }
 
-export async function registrarCompra(config: Config, pagamentoId: string, userId: string, valor: number, aprovado: boolean) {
+export async function registrarCompra(config: Config, pagamentoId: string, userId: string, valor: number, aprovado: boolean, plano: "mensal" | "anual") {
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/registrar_compra`, {
     method: "POST",
     headers: { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ p_payment_id: pagamentoId, p_user: userId, p_valor: valor, p_aprovado: aprovado }),
+    body: JSON.stringify({ p_payment_id: pagamentoId, p_user: userId, p_valor: valor, p_aprovado: aprovado, p_plano: plano }),
   });
-  if (!response.ok) throw new Error("Falha ao registrar compra anual");
+  if (!response.ok) throw new Error("Falha ao registrar compra");
   return await response.json();
 }

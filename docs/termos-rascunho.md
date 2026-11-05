@@ -22,11 +22,16 @@ O pagamento é feito pelo Mercado Pago. O aplicativo não vê os dados do seu ca
 
 ## 4. Valores e período de teste
 
-Você tem 3 dias grátis para testar o aplicativo. Os valores dos planos são:
+Você pode usar 3 dias grátis para testar o aplicativo.
+Depois do teste, o pagamento é feito pelo Mercado Pago, no Pix ou no cartão, sem precisar ter conta lá. Os valores são:
 
-- Plano mensal: R$ 14,90 no primeiro mês e R$ 19,90 depois.
-- Plano anual: R$ 149,90.
+- Plano mensal: R$ 14,90 no primeiro mês e R$ 19,90 depois. Cada pagamento dá direito a 30 dias de uso.
+- Plano anual: R$ 149,90. Dá direito a 12 meses de uso.
+
+Não existe cobrança automática e o plano não renova sozinho. O aplicativo avisa quando o seu período estiver acabando.
+
+Devolução do valor: [regra de reembolso a definir].
 
 ## 5. Cancelamento
 
-O cancelamento da assinatura é feito diretamente pelo Mercado Pago.
+Como não existe cobrança automática, você não precisa cancelar nada. Para não continuar usando o aplicativo, basta não fazer um novo pagamento quando o seu período terminar.
