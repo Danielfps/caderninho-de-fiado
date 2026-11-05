@@ -89,7 +89,11 @@ export async function chamarMercadoPago(config: Config, path: string, init: Requ
     const raw = await response.text();
     let data: any = null;
     try { data = raw ? JSON.parse(raw) : null; } catch { /* resposta fora de JSON */ }
-    if (!response.ok) throw new MercadoPagoError(`Mercado Pago respondeu ${response.status}`);
+    if (!response.ok) {
+      const causas = Array.isArray(data?.cause) ? data.cause.map((c: any) => c?.description ?? c?.code) : [];
+      const motivo = [data?.message, data?.error, ...causas].filter(Boolean).join(" | ").slice(0, 300);
+      throw new MercadoPagoError(`Mercado Pago respondeu ${response.status} em ${path.split("?")[0]}: ${motivo}`);
+    }
     return data;
   } catch (error) {
     if (error instanceof MercadoPagoError) throw error;

@@ -163,6 +163,7 @@ Ficam no aparelho: IndexedDB `caderninho` → store `kv` → chave `caderninho-v
 
 - `.github/workflows/pages.yml` publica a pasta `app/` no GitHub Pages a cada push no ramo principal
   (ou manualmente em Actions → "Publicar o app"). Endereço: https://danielfps.github.io/caderninho-de-fiado/ (repositório Danielfps/caderninho-de-fiado)
+- Aberto dentro do Instagram, Facebook, Threads ou TikTok (`navegadorSocial()`), o app não instala: `passoInstalar()` mostra como abrir no Chrome ou no Safari.
 - `app/sw.js` guarda os arquivos para funcionar offline e busca a versão nova em segundo plano
   (aparece na próxima abertura). Ao adicionar ou renomear arquivos do app, atualize a lista `ARQUIVOS`
   e troque `VERSAO` em `app/sw.js`.

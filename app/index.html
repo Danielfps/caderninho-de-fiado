@@ -372,6 +372,7 @@ const cli=id=>S.clientes.find(c=>c.id===id);
 let pedidoInstalar=null;
 const instalado=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 const ehIphone=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const navegadorSocial=()=>/Instagram|FBAN|FBAV|FB_IAB|Threads|TikTok|musical_ly|BytedanceWebview/i.test(navigator.userAgent);
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();pedidoInstalar=e;if((ui.view==='resumo'||$('#portao'))&&$('#sheet').hidden)render()});
 window.addEventListener('appinstalled',()=>{pedidoInstalar=null;render();toast('Pronto! O Caderninho está na sua tela inicial')});
 const bannerInstalar=()=>pedidoInstalar&&!instalado()?`<div class="banner"><span style="flex:1">Coloque o Caderninho na tela inicial, igual a um aplicativo.</span><button data-act="instalar">Instalar</button></div>`:'';
@@ -385,6 +386,9 @@ function blocoInstalar(){
 /* na tela de entrada: primeiro instalar, depois criar a conta (no iPhone o app instalado não enxerga a conta feita no Safari) */
 function passoInstalar(){
   if(instalado())return '';
+  if(navegadorSocial())return `<div class="card" id="passoInstalar" style="display:flex;flex-direction:column;gap:10px"><b>Para instalar, abra no navegador do celular</b>${ehIphone()
+    ?`<span class="muted small">Toque nos três pontinhos e escolha “Abrir no navegador externo” ou “Abrir no Safari”.</span><button type="button" class="btn soft" data-act="copiarLink">Copiar o link</button>`
+    :`<span class="muted small">Abra esta página no Chrome para instalar o Caderninho.</span><a class="btn" href="intent://danielfps.github.io/caderninho-de-fiado/#Intent;scheme=https;package=com.android.chrome;end">Abrir no Chrome</a>`}</div>`;
   const como=pedidoInstalar?`<button class="btn" data-act="instalar">Instalar o Caderninho</button>`
     :ehIphone()?`<p class="muted small" style="margin:0">No Safari, toque no botão de compartilhar (o quadradinho com a setinha para cima) e depois em <b>“Adicionar à Tela de Início”</b>.</p>`
     :`<p class="muted small" style="margin:0">No Chrome do celular, toque nos três pontinhos (⋮) no canto de cima e depois em <b>“Instalar app”</b> ou <b>“Adicionar à tela inicial”</b>.</p>`;
@@ -911,7 +915,7 @@ function estadoConta(){
 let pagamentoVolta='';
 async function verificarAcesso(viaMP){
   while(conferindo){const mesma=conferindoDe===meuId();await conferindo;if(mesma&&!viaMP)return estadoConta()} // outra conta: pergunta de novo
-  const antes=estadoConta(),uid=meuId();
+  const antes=estadoConta(),uid=meuId(),planoDe=x=>x?[x.assinatura,x.plano,x.valido_ate,x.anual_ate].join('|'):'',planoAntes=planoDe(meuAcesso());
   let fim;conferindo=new Promise(r=>{fim=r});conferindoDe=uid;
   if(antes==='conferindo')render();
   try{
@@ -923,6 +927,7 @@ async function verificarAcesso(viaMP){
   conferindo=null;fim();
   const depois=estadoConta();
   if(depois!==antes||depois!=='liberado')render(); // não redesenha à toa: quem está digitando uma venda não perde nada
+  else if(planoDe(meuAcesso())!==planoAntes)redesenharSeguro(); // assinou durante o teste grátis: tira o aviso e o botão de assinar
   return depois;
 }
 /* preços para mostrar antes de entrar (a tabela de planos é pública) */
@@ -1124,6 +1129,7 @@ function telaAssinar(){
     ?'O pagamento é feito no site do <b>Mercado Pago</b>, com segurança: <b>Pix</b> ou cartão (dá para parcelar). Vale por 12 meses e não é cobrado de novo sozinho: perto do fim o Caderninho avisa para renovar.'
     :`O pagamento é feito no site do <b>Mercado Pago</b>, com segurança, no cartão de crédito. ${p.promo>0&&p.promo<p.mensal?`Hoje você paga ${brl(p.promo)}; a partir do 2º mês, ${brl(p.mensal)} por mês, sozinho, até você cancelar.`:'A cobrança se repete todo mês, sozinha, até você cancelar.'}`}</p>
   ${campo('pEmail','E-mail da sua conta do Mercado Pago',`type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" value="${esc(($('#pEmail')&&$('#pEmail').value)||(u&&u.email))}"`,'Se no Mercado Pago você usa outro e-mail, troque aqui.')}
+  <p class="muted small" style="margin:0">Terminou de pagar? Volte ao Caderninho pelo ícone na tela do celular.</p>
   <button class="btn" data-act="assinIr">Ir para o pagamento${precoDoPlano(planoEscolhido,p)?' de '+brl(precoDoPlano(planoEscolhido,p)):''}</button>
   <button type="button" class="btn ghost" data-act="fechar">Agora não</button></form>`);
   if(!p.mensal)verificarAcesso().then(()=>{if($('#pEmail')&&precos().mensal)telaAssinar()});
@@ -1141,13 +1147,27 @@ function telaPagTeste(plano){const p=precos(),v=precoDoPlano(plano,p)||(plano===
   <button class="btn ghost" data-act="fechar">Desistir (não pagar)</button>`)}
 /* voltou do Mercado Pago? A mensal volta com ?preapproval_id=…; o anual (Checkout Pro) com ?payment_id=…&status=…
    (ou collection_id). O app também marca a saída em caderninho-pagando. */
+let voltaSemConta=null;
+function telaVoltaSemConta(recusado){abrir(`<h1>${recusado?'O pagamento não foi aprovado':'Falta só voltar ao Caderninho'}</h1>
+  <p style="margin:0">${recusado?'Feche esta página, abra o Caderninho pelo <b>ícone na tela do celular</b> e tente de novo com outra forma de pagamento.':'Feche esta página e abra o Caderninho pelo <b>ícone na tela do celular</b>. Se o plano ainda não estiver liberado, toque em <b>Já paguei, conferir</b>.'}</p>
+  <button class="btn" data-act="fechar">Entendi</button>`)}
+/* voltou para o ícone depois de ir pagar: confere sem esperar os 10 minutos e só agradece se a validade aumentou
+   (quem renova o anual já está liberado, então "liberado" sozinho não prova o pagamento) */
+async function conferirAoVoltar(){
+  const a=meuAcesso(),antes=a?a.liberado_ate:0;
+  await verificarAcesso(true);
+  const d=meuAcesso();if(erroAcesso||!d||d.liberado_ate<=antes||!(ativaAgora()||anualAgora()))return;
+  LS.del(KEY_PAGANDO);pagamentoVolta='';toast(anualAgora()&&!ativaAgora()?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.');
+}
 function voltouDoPagamento(){
   const q=new URLSearchParams(location.search),pag=q.get('payment_id')||q.get('collection_id')||'';
   const veio=q.has('preapproval_id')||!!pag||q.has('preference_id');
   if(/^\d{1,30}$/.test(pag))pagamentoVolta=pag;
   if(veio){
     const st=q.get('status')||q.get('collection_status')||'';
-    if(/rejected|failure|cancelled/i.test(st))setTimeout(()=>toast('O pagamento não foi aprovado. Você pode tentar de novo com outra forma de pagamento.',true),600);
+    const recusado=/rejected|failure|cancelled/i.test(st);
+    if(!sessao)voltaSemConta={recusado}; // no iPhone o navegador não enxerga a conta do ícone: mostra o caminho de volta
+    else if(recusado)setTimeout(()=>toast('O pagamento não foi aprovado. Você pode tentar de novo com outra forma de pagamento.',true),600);
     try{history.replaceState(null,'',location.pathname+location.hash)}catch(e){}
   }
   const marcou=Number(LS.get(KEY_PAGANDO))||0;
@@ -2060,6 +2080,19 @@ function aplicarImportacao(pl){
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b||b.disabled)return;
   const a=b.dataset.act,id=b.dataset.id;
+  if(a==='copiarLink'){
+    const link='https://danielfps.github.io/caderninho-de-fiado/';
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(link);
+      else throw new Error('clipboard indisponível');
+      toast('Link copiado. Abra no Safari para instalar.');
+    }catch{
+      const campo=document.createElement('textarea');campo.value=link;campo.setAttribute('readonly','');campo.style.position='fixed';campo.style.opacity='0';document.body.appendChild(campo);campo.select();
+      let copiou=false;try{copiou=document.execCommand('copy')}catch{}campo.remove();
+      toast(copiou?'Link copiado. Abra no Safari para instalar.':'Não foi possível copiar o link.',!copiou);
+    }
+    return;
+  }
   if(a.startsWith('conta')||a.startsWith('assin')||a.startsWith('teste')||a==='verSenha')return acaoConta(a,b);
   switch(a){
     case 'ir': if(b.dataset.v==='vender'&&ui.view!=='vender'&&!ui.venda.clienteId&&!Object.keys(ui.venda.itens).length&&!ui.venda.avulsos.length)ui.venda=novaVenda(); ir(b.dataset.v); break;
@@ -2242,18 +2275,21 @@ document.addEventListener('submit',e=>e.preventDefault()); // "Ok/Ir" do teclado
   await voltouDoEmail();
   if(sessao&&!precisaCodigo()){
     atualizarUsuario().catch(()=>{});
+    const ac=meuAcesso(),antesDePagar=ac?ac.liberado_ate:0; // quem renova o anual já está liberado: só agradece se a validade aumentou
     await verificarAcesso(pagou);
+    const dep=meuAcesso();
     if(pagou&&!erroAcesso){
-      if(ativaAgora()||anualAgora()){LS.del(KEY_PAGANDO);pagamentoVolta='';toast(anualAgora()&&!ativaAgora()?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.')}
+      if((ativaAgora()||anualAgora())&&dep&&dep.liberado_ate>antesDePagar){LS.del(KEY_PAGANDO);pagamentoVolta='';toast(anualAgora()&&!ativaAgora()?'Plano anual confirmado! Obrigado.':'Assinatura confirmada! Obrigado.')}
       else toast('Ainda não chegou a confirmação do Mercado Pago. Toque em “Já paguei, conferir” daqui a pouco.',true);
     }
     sync.agora();
-  }else if(!sessao)carregarPreco();
+  }else if(!sessao){carregarPreco();if(voltaSemConta)telaVoltaSemConta(voltaSemConta.recusado)}
   window.addEventListener('hashchange',()=>{voltouDoEmail()});
   /* voltou para o app depois de um tempo: confere de novo (no máximo a cada 10 minutos) e traz o que mudou nos outros celulares */
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden||!sessao||precisaCodigo())return;
-    const a=meuAcesso();if(!a||Date.now()-a.em>10*60e3||semRede())verificarAcesso(!!LS.get(KEY_PAGANDO));
+    const a=meuAcesso(),pagando=!!LS.get(KEY_PAGANDO);
+    if(pagando)conferirAoVoltar();else if(!a||Date.now()-a.em>10*60e3||semRede())verificarAcesso(false);
     sync.agora();
   });
   /* a internet voltou: confere a conta e manda o que ficou esperando */

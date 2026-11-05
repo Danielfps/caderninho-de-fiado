@@ -93,14 +93,19 @@ Para desligar um plano sem apagar o histórico, use `update public.planos set at
 
 ## 7. Conferências necessárias no primeiro teste
 
-O desenho recebido tem alguns detalhes que precisam ser confirmados com uma cobrança de teste e os logs do Mercado Pago:
+Confirmado em uma assinatura de teste aprovada:
 
-- **Resumo da assinatura:** confirmar se `preapproval.summary.charged_quantity` aparece na resposta da consulta e passa a `1` depois do primeiro pagamento.
-- **Aviso da cobrança mensal:** confirmar se `subscription_authorized_payment` retorna o `authorized_payment` com `status: processed` e `payment.status: approved` como esperado.
-- **Mudança da próxima mensalidade:** confirmar se `PUT /preapproval/{id}` aceita `auto_recurring.transaction_amount` e `reason` e se a resposta (ou um `GET` seguinte) informa R$ 19,90.
-- **Checkout anual:** confirmar se o Mercado Pago aceita `payment_methods.installments`, `default_installments`, `expires`, `expiration_date_to` e `statement_descriptor` juntos, e se `init_point` é o endereço de produção esperado.
-- **Volta automática:** confirmar se `auto_return: approved` funciona com a URL HTTPS cadastrada. O servidor só envia esse campo para retorno HTTPS.
-- **Aviso de compra e estorno:** confirmar que o evento `payment` contém `data.id` e que a consulta do pagamento retorna `external_reference`, `currency_id`, `transaction_amount` e o status final (`approved`, `refunded` ou `charged_back`).
+- **Resumo da assinatura:** `GET /preapproval/{id}` retornou `summarized` (não `summary`) com `charged_quantity: 1`, `charged_amount: 14.9`, `semaphore: "green"` e `last_charged_amount: 14.9`. A regra do servidor agora usa `summarized.charged_quantity`.
+- **Cobrança autorizada:** `GET /authorized_payments/search?preapproval_id=ID` retornou item com `type: "recurring"`, `status: "processed"`, `transaction_amount: 14.9`, `retry_attempt: 1` e pagamento associado `status: "approved"`, `status_detail: "accredited"`. A assinatura veio `authorized`, com `payment_method_id: "account_money"` e `next_payment_date` presente.
+- **Conferência no app e promoção:** após tocar em **Já paguei, conferir**, a assinatura ficou ativa por R$ 14,90, mas `promo_consumida_em` permaneceu nulo. Isso identificou que a leitura anterior de `summary` não reconhecia a cobrança; a correção para `summarized` está coberta pelo teste automatizado, mas a gravação corrigida ainda precisa ser confirmada em nova cobrança.
+- **Aviso de assinatura:** cerca de quatro minutos depois, a assinatura ainda não havia sido atualizada pelo webhook. Não foi confirmado se o aviso chegou, então a entrega e o processamento do webhook seguem por verificar.
+
+Continuam por confirmar:
+
+- **Mudança da próxima mensalidade:** se `PUT /preapproval/{id}` aceita `auto_recurring.transaction_amount` e `reason` e se a resposta (ou um `GET` seguinte) informa R$ 19,90.
+- **Checkout anual:** se o Mercado Pago aceita `payment_methods.installments`, `default_installments`, `expires`, `expiration_date_to` e `statement_descriptor` juntos, e se `init_point` é o endereço de produção esperado.
+- **Volta automática:** se `auto_return: approved` funciona com a URL HTTPS cadastrada. O servidor só envia esse campo para retorno HTTPS.
+- **Aviso de compra e estorno:** se o evento `payment` contém `data.id` e se a consulta retorna `external_reference`, `currency_id`, `transaction_amount` e status final (`approved`, `refunded` ou `charged_back`).
 
 Se algum campo não vier no formato esperado, o servidor não consome a promoção sem prova de pagamento e não libera uma compra anual sem conferir moeda, valor e referência da conta.
 

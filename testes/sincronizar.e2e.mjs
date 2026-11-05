@@ -33,6 +33,7 @@ const servidor = createServer(async (req, res) => {
     if (caminho.startsWith('/supa/')) return await falso.tratar(req, res, caminho.slice('/supa/'.length));
     if (caminho === '/' || caminho === '/index.html') {
       const html = readFileSync(path.join(raizApp, 'index.html'), 'utf8')
+        .replace(/const CONTA_URL='[^']*';/, "const CONTA_URL='';").replace(/const CONTA_CHAVE='[^']*';/, "const CONTA_CHAVE='';") // o app no repositório aponta para o servidor de verdade; aqui ele fala só com o de mentira
         .replace("const CONTA_URL='';", `const CONTA_URL='${base}supa';`)
         .replace("const CONTA_CHAVE='';", `const CONTA_CHAVE='${falso.chave}';`);
       if (!html.includes(`${base}supa`)) throw new Error('não achei CONTA_URL vazio no app');

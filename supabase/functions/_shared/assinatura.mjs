@@ -41,7 +41,7 @@ export function pagamentoAnualValido(pagamento, precoAnual = 149.9) {
 
 export function cobrancaAprovada({ preapproval, pagamento, precoMensal = 19.9 }) {
   return Number(preapproval?.auto_recurring?.transaction_amount) < Number(precoMensal)
-    && (Number(preapproval?.summary?.charged_quantity) >= 1
+    && (Number(preapproval?.summarized?.charged_quantity) >= 1
       || (pagamento?.status === 'processed' && pagamento?.payment?.status === 'approved'));
 }
 

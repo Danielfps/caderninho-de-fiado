@@ -88,7 +88,8 @@ test('pagamento anual só aceita referência da conta, aprovado em BRL e valor m
 
 test('promoção só termina depois de prova de cobrança aprovada e validade anual soma 365 dias',()=>{
   assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}}}),false);
-  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summary:{charged_quantity:1}}}),true);
+  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summarized:{charged_quantity:1}}}),true);
+  assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9},summary:{charged_quantity:1}}}),false);
   assert.equal(cobrancaAprovada({preapproval:{auto_recurring:{transaction_amount:14.9}},pagamento:{status:'processed',payment:{status:'approved'}}}),true);
   assert.equal(novaValidadeAnual({agora:'2026-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');
   assert.equal(calcularLiberadoAte({testeAte:'2026-01-02T00:00:00Z',anualAte:'2027-01-01T00:00:00Z'}),'2027-01-01T00:00:00.000Z');

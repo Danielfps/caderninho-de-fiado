@@ -45,8 +45,13 @@ function iniciarServidor() {
       res.writeHead(400).end('Pedido inválido');
       return;
     }
+    // O app no repositório aponta para o servidor de verdade: o teste sempre roda com a configuração vazia (modo de teste).
+    const original = readFileSync(path.join(raizApp, 'index.html'), 'utf8').replace(/const CONTA_URL='[^']*';/, "const CONTA_URL='';").replace(/const CONTA_CHAVE='[^']*';/, "const CONTA_CHAVE='';");
+    if ((caminho === '/' || caminho === '/index.html') && pedido.searchParams.get('config-parcial') !== '1') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(original);
+      return;
+    }
     if (caminho === '/' && pedido.searchParams.get('config-parcial') === '1') {
-      const original = readFileSync(path.join(raizApp, 'index.html'), 'utf8');
       const marcador = "const CONTA_URL='';";
       if (!original.includes(marcador) || !original.includes("const CONTA_CHAVE='';")) {
         res.writeHead(500).end('Configuração vazia esperada não encontrada');
@@ -162,6 +167,39 @@ async function conferirCliente() {
 async function fluxo() {
   const url = await iniciarServidor();
   navegador = await chromium.launch({ headless: true });
+
+  await passo('Navegador social no Android mostra o caminho para o Chrome', async () => {
+    const contextoAndroid = await navegador.newContext({
+      ...devices['Pixel 7'],
+      userAgent: `${devices['Pixel 7'].userAgent} Instagram 999.0 Android`,
+      serviceWorkers: 'block',
+    });
+    const paginaAndroid = await contextoAndroid.newPage();
+    await paginaAndroid.goto(url, { waitUntil: 'domcontentloaded' });
+    const cartao = paginaAndroid.locator('#passoInstalar');
+    await expect(cartao).toContainText('Para instalar, abra no navegador do celular');
+    await expect(cartao.locator('a')).toHaveText('Abrir no Chrome');
+    await expect(cartao.locator('a')).toHaveAttribute('href', 'intent://danielfps.github.io/caderninho-de-fiado/#Intent;scheme=https;package=com.android.chrome;end');
+    await expect(paginaAndroid.locator('#app #portao [data-act="contaCriar"]')).toBeVisible();
+    await contextoAndroid.close();
+  });
+
+  await passo('Navegador social no iPhone mostra a instrução e copiar link', async () => {
+    const userAgentIphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 999.0';
+    const contextoIphone = await navegador.newContext({ userAgent: userAgentIphone, serviceWorkers: 'block' });
+    const paginaIphone = await contextoIphone.newPage();
+    await paginaIphone.goto(url, { waitUntil: 'domcontentloaded' });
+    const cartao = paginaIphone.locator('#passoInstalar');
+    await expect(cartao).toContainText('Para instalar, abra no navegador do celular');
+    await expect(cartao).toContainText('três pontinhos');
+    await expect(cartao.locator('[data-act="copiarLink"]')).toHaveText('Copiar o link');
+    await expect(paginaIphone.locator('#app #portao [data-act="contaCriar"]')).toBeVisible();
+    await cartao.locator('[data-act="copiarLink"]').click();
+    await expect(paginaIphone.locator('#toast')).toBeVisible();
+    await expect(paginaIphone.locator('#toast')).toContainText(/Link copiado|Não foi possível copiar o link/);
+    await contextoIphone.close();
+  });
+
   const contexto = await navegador.newContext({ ...devices['Pixel 7'], serviceWorkers: 'block' });
   pagina = await contexto.newPage();
   pagina.on('pageerror', (erro) => errosPagina.push(erro.message));
@@ -305,6 +343,15 @@ async function fluxo() {
       await expect(pagina.locator('body')).toHaveClass(/\btrancado\b/);
       await expect(pagina.locator('#app #portao')).toHaveAttribute('data-estado', 'entrar');
       await print('16-configuracao-parcial');
+    });
+    await passo('Volta do pagamento sem conta mostra o caminho até o ícone', async () => {
+      await pagina.goto(`${url}?preapproval_id=abc123`, { waitUntil: 'domcontentloaded' });
+      await expect(pagina.locator('#sheet')).toBeVisible();
+      await expect(pagina.locator('#sheet h1')).toHaveText('Falta só voltar ao Caderninho');
+      await expect(pagina).not.toHaveURL(/preapproval_id/);
+      await pagina.goto(`${url}?payment_id=123&status=rejected`, { waitUntil: 'domcontentloaded' });
+      await expect(pagina.locator('#sheet h1')).toHaveText('O pagamento não foi aprovado');
+      await print('17-volta-sem-conta');
     });
   } finally {
     pagina = paginaAnterior;
